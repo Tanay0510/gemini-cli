@@ -3303,6 +3303,32 @@
         }
       },
       "additionalProperties": false
+    },
+    "teamContext": {
+      "title": "Team Context Sharing",
+      "description": "Settings for sharing conversation context with teammates via Gemini context caching.",
+      "markdownDescription": "Settings for sharing conversation context with teammates via Gemini context caching.\n\n- Category: `General`\n- Requires restart: `no`\n- Default: `{}`",
+      "default": {},
+      "type": "object",
+      "properties": {
+        "myName": {
+          "title": "My Name",
+          "description": "Your identifier used when sharing context (e.g. \"alice\"). Defaults to your OS username.",
+          "markdownDescription": "Your identifier used when sharing context (e.g. \"alice\"). Defaults to your OS username.\n\n- Category: `General`\n- Requires restart: `no`",
+          "type": "string"
+        },
+        "teammates": {
+          "title": "Teammates",
+          "description": "List of teammate names for tab-completion when sharing context (e.g. [\"alice\", \"bob\"]).",
+          "markdownDescription": "List of teammate names for tab-completion when sharing context (e.g. [\"alice\", \"bob\"]).\n\n- Category: `General`\n- Requires restart: `no`\n- Default: `[]`",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "$defs": {

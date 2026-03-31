@@ -1873,6 +1873,18 @@ their corresponding top-level category object in your `settings.json` file.
 - **`admin.skills.enabled`** (boolean):
   - **Description:** If false, disallows agent skills from being used.
   - **Default:** `true`
+
+#### `teamContext`
+
+- **`teamContext.myName`** (string):
+  - **Description:** Your identifier used when sharing context (e.g. "alice").
+    Defaults to your OS username.
+  - **Default:** `undefined`
+
+- **`teamContext.teammates`** (array):
+  - **Description:** List of teammate names for tab-completion when sharing
+    context (e.g. ["alice", "bob"]).
+  - **Default:** `[]`
   <!-- SETTINGS-AUTOGEN:END -->
 
 #### `mcpServers`

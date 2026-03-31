@@ -48,3 +48,11 @@ export { getCodeAssistServer } from './src/code_assist/codeAssist.js';
 export { getExperiments } from './src/code_assist/experiments/experiments.js';
 export { ExperimentFlags } from './src/code_assist/experiments/flagNames.js';
 export { getErrorStatus, ModelNotFoundError } from './src/utils/httpErrors.js';
+export {
+  ContextShareService,
+  type ContextShareServiceOptions,
+} from './src/services/contextShareService.js';
+export type { SharedContextEnvelope } from './src/services/contextStorageProvider.js';
+export type { ContextStorageProvider } from './src/services/contextStorageProvider.js';
+export { GeminiFilesProvider } from './src/services/geminiFilesProvider.js';
+export { GcsProvider } from './src/services/gcsProvider.js';

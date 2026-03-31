@@ -476,4 +476,53 @@ export class ChatCompressionService {
       };
     }
   }
+
+  /**
+   * Generates a very short (5-7 word) summary of the dialogue to use as a label.
+   */
+  async summarize(
+    history: readonly Content[],
+    config: Config,
+    model: string,
+    abortSignal?: AbortSignal,
+  ): Promise<string> {
+    const dialogue = history
+      .filter((turn) => turn.role && turn.role !== 'system')
+      .map((turn) => {
+        const text = turn.parts?.[0]?.text || '';
+        return `${turn.role!.toUpperCase()}: ${text}`;
+      })
+      .join('\n')
+      .slice(-10000); // Limit context for speed
+
+    const response = await config.getBaseLlmClient().generateContent({
+      modelConfigKey: { model: modelStringToModelConfigAlias(model) },
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text:
+                'Generate a concise, professional summary of this conversation. ' +
+                'This will be placed at the top of a shared chat history to give the recipient context.\n\n' +
+                'Focus on: \n' +
+                '- The main objective of the discussion\n' +
+                '- Key technical decisions made\n' +
+                '- Current status or remaining tasks\n\n' +
+                `CONVERSATION:\n${dialogue}\n\nSUMMARY:`,
+            },
+          ],
+        },
+      ],
+      promptId: 'share-summarize',
+      role: LlmRole.UTILITY_COMPRESSOR,
+      abortSignal: abortSignal ?? new AbortController().signal,
+    });
+
+    return (
+      getResponseText(response)
+        ?.trim()
+        .replace(/^"(.*)"$/, '$1') || ''
+    );
+  }
 }

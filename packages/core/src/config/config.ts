@@ -190,6 +190,12 @@ export interface PlanSettings {
   modelRouting?: boolean;
 }
 
+export interface ShareSettings {
+  myName?: string;
+  teammates?: string[];
+  bucket?: string;
+}
+
 export interface TelemetrySettings {
   enabled?: boolean;
   target?: TelemetryTarget;
@@ -712,6 +718,7 @@ export interface ConfigParameters {
   topicUpdateNarration?: boolean;
   toolOutputMasking?: Partial<ToolOutputMaskingConfig>;
   disableLLMCorrection?: boolean;
+  share?: ShareSettings;
   plan?: boolean;
   tracker?: boolean;
   planSettings?: PlanSettings;
@@ -944,6 +951,7 @@ export class Config implements McpContext, AgentLoopContext {
   private readonly memoryBoundaryMarkers: readonly string[];
   private readonly topicUpdateNarration: boolean;
   private readonly disableLLMCorrection: boolean;
+  private readonly share: ShareSettings;
   private readonly planEnabled: boolean;
   private readonly trackerEnabled: boolean;
   private readonly planModeRoutingEnabled: boolean;
@@ -1179,6 +1187,7 @@ export class Config implements McpContext, AgentLoopContext {
     };
     this.topicUpdateNarration = params.topicUpdateNarration ?? false;
     this.modelSteering = params.modelSteering ?? false;
+    this.share = params.share ?? {};
     this.injectionService = new InjectionService(() =>
       this.isModelSteeringEnabled(),
     );
@@ -2402,6 +2411,10 @@ export class Config implements McpContext, AgentLoopContext {
 
   isTopicUpdateNarrationEnabled(): boolean {
     return this.topicUpdateNarration;
+  }
+
+  getShareSettings(): ShareSettings {
+    return this.share;
   }
 
   isModelSteeringEnabled(): boolean {

@@ -1015,6 +1015,7 @@ export async function loadCliConfig(
     retryFetchErrors: settings.general?.retryFetchErrors,
     billing: settings.billing,
     maxAttempts: settings.general?.maxAttempts,
+    share: settings.share,
     ptyInfo: ptyInfo?.name,
     disableLLMCorrection: settings.tools?.disableLLMCorrection,
     rawOutput: argv.rawOutput,

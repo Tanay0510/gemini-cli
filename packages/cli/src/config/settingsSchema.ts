@@ -2694,6 +2694,51 @@ const SETTINGS_SCHEMA = {
       },
     },
   },
+  share: {
+    type: 'object',
+    label: 'Team Sharing',
+    category: 'General',
+    requiresRestart: false,
+    default: {},
+    description: 'Settings for sharing conversation context with teammates.',
+    showInDialog: true,
+    properties: {
+      myName: {
+        type: 'string',
+        label: 'My Name',
+        category: 'General',
+        requiresRestart: false,
+        default: undefined as string | undefined,
+        description:
+          'Your identifier used when sharing context (e.g. "alice"). ' +
+          'Defaults to your Google email (if logged in) or OS username.',
+        showInDialog: true,
+      },
+      teammates: {
+        type: 'array',
+        label: 'Teammates',
+        category: 'General',
+        requiresRestart: false,
+        default: [] as string[],
+        description:
+          'Teammate names for tab-completion (e.g. ["bob", "carol"]).',
+        showInDialog: true,
+        items: { type: 'string' as const },
+        mergeStrategy: MergeStrategy.UNION,
+      },
+      bucket: {
+        type: 'string',
+        label: 'Shared Bucket URI',
+        category: 'General',
+        requiresRestart: false,
+        default: undefined as string | undefined,
+        description:
+          'GCS bucket for enterprise sharing (e.g. "gs://my-team-bucket"). ' +
+          'If empty, a bucket will be automatically discovered from your email domain.',
+        showInDialog: true,
+      },
+    },
+  },
 } as const satisfies SettingsSchema;
 
 export type SettingsSchemaType = typeof SETTINGS_SCHEMA;

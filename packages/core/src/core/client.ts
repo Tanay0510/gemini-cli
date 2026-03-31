@@ -1235,6 +1235,15 @@ export class GeminiClient {
   }
 
   /**
+   * Generates a concise summary of the current conversation history.
+   */
+  async summarizeChat(model?: string): Promise<string> {
+    const history = this.getHistory();
+    const useModel = model ?? this._getActiveModelForCurrentTurn();
+    return this.compressionService.summarize(history, this.config, useModel);
+  }
+
+  /**
    * Masks bulky tool outputs to save context window space.
    */
   private async tryMaskToolOutputs(history: readonly Content[]): Promise<void> {
