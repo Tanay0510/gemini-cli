@@ -40,8 +40,8 @@ function renderInbox(inbox: SharedContextEnvelope[]): string {
     return 'Your inbox is empty. Ask a teammate to run /share @<your-name>.';
   }
   const lines = [
-    `  ${'#'.padEnd(3)} ${'From'.padEnd(26)} ${'Age'.padEnd(10)} ${'Verified'.padEnd(12)} ${'Label'.padEnd(20)} Model`,
-    `  ${'─'.repeat(85)}`,
+    `  ${'#'.padEnd(3)} ${'From'.padEnd(26)} ${'Age'.padEnd(10)} ${'Verified'.padEnd(12)} ${'Label/Summary'.padEnd(30)} Model`,
+    `  ${'─'.repeat(95)}`,
   ];
   inbox.forEach((item, i) => {
     const idx = String(i + 1).padEnd(3);
@@ -50,13 +50,17 @@ function renderInbox(inbox: SharedContextEnvelope[]): string {
     const verified = isVerified(item.from)
       ? '✓ Google'.padEnd(12)
       : '⚠ unverified'.padEnd(12);
-    const label = (item.label ?? '—').padEnd(20);
+    const label = (item.label || '—').padEnd(30);
     const model = item.model.replace('models/', '');
     lines.push(`  ${idx} ${from} ${age} ${verified} ${label} ${model}`);
   });
   lines.push('');
   lines.push('  /inbox load <#>     — load context into current session');
   lines.push('  /inbox dismiss <#>  — delete without loading');
+  lines.push('');
+  lines.push(
+    '  Tip: You can add a label when sharing: /share @teammate "fix for auth bug"',
+  );
   return lines.join('\n');
 }
 

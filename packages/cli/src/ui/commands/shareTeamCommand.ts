@@ -33,7 +33,7 @@ const MIN_HISTORY_LENGTH = 2;
 export const shareTeamCommand: SlashCommand = {
   name: 'share',
   description:
-    'Share the current conversation context with one or more teammates. Usage: /share @<teammate> [@<teammate2> …] [label]',
+    'Share the current conversation context with one or more teammates. Usage: /share @<teammate> [label]',
   kind: CommandKind.BUILT_IN,
   autoExecute: true,
   takesArgs: true,
@@ -193,13 +193,15 @@ export const shareTeamCommand: SlashCommand = {
 
       // Upload in parallel — one file per recipient
       const results = await Promise.allSettled(
-        normalizedRecipients.map((recipient) => shareService.share({
+        normalizedRecipients.map((recipient) =>
+          shareService.share({
             to: recipient,
             from: fromName,
             model,
             history: [summaryTurn, ...cleanHistory],
             label: finalLabel,
-          })),
+          }),
+        ),
       );
 
       const succeeded: string[] = [];
@@ -218,14 +220,14 @@ export const shareTeamCommand: SlashCommand = {
         }
       });
 
-      const labelNote = finalLabel ? ` [${finalLabel}]` : '';
+      const labelNote = finalLabel ? ` with label: "${finalLabel}"` : '';
       if (succeeded.length > 0) {
         const providerName = shareService.getProviderName();
         ui.addItem(
           {
             type: MessageType.INFO,
             text: [
-              `✓ Context shared with ${succeeded.join(', ')}${labelNote} using ${providerName}.`,
+              `✓ Context shared with ${succeeded.join(', ')}${labelNote} via ${providerName}.`,
               `They can load it by running: /inbox`,
             ].join('\n'),
           },

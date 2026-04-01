@@ -547,7 +547,7 @@ export class ChatCompressionService {
   }
 
   /**
-   * Generates a very short (5-7 word) summary of the dialogue to use as a label.
+   * Generates a concise, professional summary of the dialogue to use as a label.
    */
   async summarize(
     history: readonly Content[],
@@ -559,10 +559,17 @@ export class ChatCompressionService {
       .filter((turn) => turn.role && turn.role !== 'system')
       .map((turn) => {
         const text = turn.parts?.[0]?.text || '';
-        return `${turn.role!.toUpperCase()}: ${text}`;
+        const toolCalls = (turn.parts ?? [])
+          .filter((p) => p.functionCall)
+          .map(
+            (p) =>
+              `TOOL_CALL: ${p.functionCall!.name}(${JSON.stringify(p.functionCall!.args)})`,
+          )
+          .join('\n');
+        return `${turn.role!.toUpperCase()}: ${text}${toolCalls ? `\n${toolCalls}` : ''}`;
       })
       .join('\n')
-      .slice(-10000); // Limit context for speed
+      .slice(-15000); // Increased context for better detail
 
     const response = await config.getBaseLlmClient().generateContent({
       modelConfigKey: { model: modelStringToModelConfigAlias(model) },
@@ -572,12 +579,15 @@ export class ChatCompressionService {
           parts: [
             {
               text:
-                'Generate a concise, professional summary of this conversation. ' +
+                'Generate an in-depth, professional technical summary of this conversation. ' +
                 'This will be placed at the top of a shared chat history to give the recipient context.\n\n' +
-                'Focus on: \n' +
-                '- The main objective of the discussion\n' +
-                '- Key technical decisions made\n' +
-                '- Current status or remaining tasks\n\n' +
+                'Your summary MUST include:\n' +
+                '- The main technical objective and problem being solved.\n' +
+                '- Specific file paths, function names, or components discussed.\n' +
+                '- Key technical decisions and the rationale behind them.\n' +
+                '- If code was written or modified, include a short, relevant snippet or a description of the logic change.\n' +
+                '- Current implementation status and any critical remaining tasks.\n\n' +
+                'Format the output using markdown for clarity (e.g., # Summary, ## Key Decisions, code blocks).\n\n' +
                 `CONVERSATION:\n${dialogue}\n\nSUMMARY:`,
             },
           ],

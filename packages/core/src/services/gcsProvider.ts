@@ -113,27 +113,43 @@ export class GcsProvider implements ContextStorageProvider {
     const token = await this.getAccessToken();
     const body = JSON.stringify(history);
 
-    const customMetadata: Record<string, string> = {
-      'x-goog-meta-share-from': from,
-      'x-goog-meta-share-model': model,
-      'x-goog-meta-share-ts': String(timestamp),
+    const boundary = `-------boundary_${Date.now()}`;
+    const metadata = {
+      name,
+      metadata: {
+        'share-from': from,
+        'share-model': model,
+        'share-ts': String(timestamp),
+        ...(label && { 'share-label': label }),
+      },
     };
-    if (label) {
-      customMetadata['x-goog-meta-share-label'] = label;
-    }
 
-    const url =
-      `${GCS_UPLOAD_BASE}/b/${encodeURIComponent(this.bucketName)}/o` +
-      `?uploadType=media&name=${encodeURIComponent(name)}`;
+    const part1 = [
+      `--${boundary}`,
+      'Content-Type: application/json; charset=UTF-8',
+      '',
+      JSON.stringify(metadata),
+      '',
+    ].join('\r\n');
+
+    const part2 = [
+      `--${boundary}`,
+      'Content-Type: application/json',
+      '',
+      body,
+      '',
+      `--${boundary}--`,
+    ].join('\r\n');
+
+    const url = `${GCS_UPLOAD_BASE}/b/${encodeURIComponent(this.bucketName)}/o?uploadType=multipart`;
 
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        ...customMetadata,
+        'Content-Type': `multipart/related; boundary=${boundary}`,
       },
-      body,
+      body: part1 + part2,
     });
 
     if (!response.ok) {
@@ -175,9 +191,11 @@ export class GcsProvider implements ContextStorageProvider {
       const data = (await response.json()) as GcsListResponse;
       for (const obj of data.items ?? []) {
         const meta = obj.metadata || {};
-        const from = meta['share-from'] || meta['x-goog-meta-share-from'];
-        const model = meta['share-model'] || meta['x-goog-meta-share-model'];
-        const ts = meta['share-ts'] || meta['x-goog-meta-share-ts'];
+
+        const from = meta['share-from'];
+        const model = meta['share-model'];
+        const ts = meta['share-ts'];
+        const label = meta['share-label'];
 
         // Fallback: Parse from filename if metadata is missing (Enterprise-friendly)
         if (!from || !model || !ts) {
@@ -199,11 +217,11 @@ export class GcsProvider implements ContextStorageProvider {
 
         results.push({
           fileName: obj.name,
-          from,
+          from: from || 'unknown',
           to: recipientEmail,
-          model,
-          timestamp: parseInt(ts, 10),
-          label: meta['share-label'] || meta['x-goog-meta-share-label'],
+          model: model || 'unknown',
+          timestamp: ts ? parseInt(ts, 10) : 0,
+          label,
         });
       }
 

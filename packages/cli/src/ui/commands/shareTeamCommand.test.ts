@@ -10,11 +10,13 @@ import { createMockCommandContext } from '../../test-utils/mockCommandContext.js
 import { MessageType } from '../types.js';
 import type { CommandContext } from './types.js';
 
-const { mockShare, mockTryCompressChat, mockGetHistory } = vi.hoisted(() => ({
-  mockShare: vi.fn(),
-  mockTryCompressChat: vi.fn(),
-  mockGetHistory: vi.fn(),
-}));
+const { mockShare, mockTryCompressChat, mockGetHistory, mockSummarizeChat } =
+  vi.hoisted(() => ({
+    mockShare: vi.fn(),
+    mockTryCompressChat: vi.fn(),
+    mockGetHistory: vi.fn(),
+    mockSummarizeChat: vi.fn(),
+  }));
 
 vi.mock('@google/gemini-cli-core', async (importOriginal) => {
   const actual =
@@ -23,6 +25,7 @@ vi.mock('@google/gemini-cli-core', async (importOriginal) => {
     ...actual,
     ContextShareService: vi.fn().mockImplementation(() => ({
       share: mockShare,
+      getProviderName: vi.fn().mockReturnValue('TestProvider'),
     })),
     UserAccountManager: vi.fn().mockImplementation(() => ({
       getCachedGoogleAccount: vi.fn().mockReturnValue(null),
@@ -44,6 +47,7 @@ function buildContext(overrides = {}): CommandContext {
         geminiClient: {
           getChat: vi.fn().mockReturnValue({ getHistory: mockGetHistory }),
           tryCompressChat: mockTryCompressChat,
+          summarizeChat: mockSummarizeChat,
         },
         config: {
           getContentGeneratorConfig: vi
@@ -73,6 +77,7 @@ describe('shareTeamCommand', () => {
     mockShare.mockResolvedValue(undefined);
     mockTryCompressChat.mockResolvedValue(undefined);
     mockGetHistory.mockReturnValue(enoughHistory);
+    mockSummarizeChat.mockResolvedValue('conversation summary');
     ctx = buildContext();
   });
 
@@ -96,7 +101,20 @@ describe('shareTeamCommand', () => {
     await shareTeamCommand.action!(ctx, 'alice');
 
     expect(mockShare).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ to: 'alice', label: undefined }),
+      expect.objectContaining({
+        to: 'alice',
+        label: 'conversation summary',
+        history: expect.arrayContaining([
+          expect.objectContaining({
+            role: 'user',
+            parts: expect.arrayContaining([
+              expect.objectContaining({
+                text: expect.stringContaining('### CONVERSATION SUMMARY'),
+              }),
+            ]),
+          }),
+        ]),
+      }),
     );
   });
 
@@ -130,11 +148,11 @@ describe('shareTeamCommand', () => {
   // Argument parsing — labels
   // --------------------------------------------------------------------------
 
-  it('passes undefined label when no label is given', async () => {
+  it('uses summary as label when no label is given', async () => {
     await shareTeamCommand.action!(ctx, '@alice');
 
     expect(mockShare).toHaveBeenCalledWith(
-      expect.objectContaining({ label: undefined }),
+      expect.objectContaining({ label: 'conversation summary' }),
     );
   });
 
@@ -191,7 +209,7 @@ describe('shareTeamCommand', () => {
     expect(ctx.ui.addItem).toHaveBeenCalledWith(
       expect.objectContaining({
         type: MessageType.INFO,
-        text: expect.stringContaining('[auth bug]'),
+        text: expect.stringContaining('with label: "auth bug"'),
       }),
       expect.any(Number),
     );
