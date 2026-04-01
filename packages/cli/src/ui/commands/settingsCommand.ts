@@ -18,9 +18,25 @@ function getNestedProperty(
   obj: Record<string, unknown>,
   path: string,
 ): unknown {
-  return path
-    .split('.')
-    .reduce((prev, curr) => (prev)?.[curr], obj);
+  let current: Record<string, unknown> = obj;
+  const keys = path.split('.');
+  const lastKey = keys.pop();
+
+  if (!lastKey) {
+    return undefined;
+  }
+
+  for (const key of keys) {
+    const next = current[key];
+    if (next && typeof next === 'object') {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      current = next as Record<string, unknown>;
+    } else {
+      return undefined;
+    }
+  }
+
+  return current[lastKey];
 }
 
 function getAllSettingKeys(schema: SettingsSchema, prefix = ''): string[] {

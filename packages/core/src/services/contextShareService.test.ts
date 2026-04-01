@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ContextShareService } from './contextShareService.js';
+import type { UserAccountManager as UserAccountManagerType } from '../utils/userAccountManager.js';
 import {
   AuthType,
   type ContentGeneratorConfig,
@@ -98,7 +99,7 @@ describe('ContextShareService', () => {
         () =>
           ({
             getCachedGoogleAccount: vi.fn().mockReturnValue('user@google.com'),
-          }) as unknown as UserAccountManager,
+          }) as unknown as UserAccountManagerType,
       );
 
       new ContextShareService({ config: vertexConfig });
@@ -114,7 +115,7 @@ describe('ContextShareService', () => {
         () =>
           ({
             getCachedGoogleAccount: vi.fn().mockReturnValue(null),
-          }) as unknown as UserAccountManager,
+          }) as unknown as UserAccountManagerType,
       );
 
       expect(

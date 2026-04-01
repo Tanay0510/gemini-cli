@@ -68,7 +68,7 @@ describe('sharingUtils', () => {
       ];
       const result = stripEnvironmentContext(history);
       expect(result).toHaveLength(1);
-      expect(result[0].parts[0].text).toBe('hello');
+      expect(result[0].parts![0].text).toBe('hello');
     });
 
     it('removes turns containing Directory Structure', () => {
@@ -81,7 +81,7 @@ describe('sharingUtils', () => {
       ];
       const result = stripEnvironmentContext(history);
       expect(result).toHaveLength(1);
-      expect(result[0].parts[0].text).toBe('actual question');
+      expect(result[0].parts![0].text).toBe('actual question');
     });
 
     it('keeps normal turns', () => {
