@@ -17,6 +17,8 @@ import { GeminiFilesProvider } from './geminiFilesProvider.js';
 import { GcsProvider } from './gcsProvider.js';
 import { UserAccountManager } from '../utils/userAccountManager.js';
 import { getDefaultSharedBucket } from '../utils/sharingUtils.js';
+import { ChatCompressionService } from './chatCompressionService.js';
+import type { Config } from '../config/config.js';
 
 // Re-export for consumers that import from this file.
 export type { SharedContextEnvelope } from './contextStorageProvider.js';
@@ -117,6 +119,20 @@ export class ContextShareService {
    */
   async dismiss(fileName: string): Promise<void> {
     return this.provider.delete(fileName);
+  }
+
+  /**
+   * Generates a detailed recipient-oriented briefing from a loaded conversation
+   * history. Produces a structured summary covering objective, work done, key
+   * decisions, current status, and next steps.
+   */
+  async summarizeShared(
+    history: Content[],
+    config: Config,
+    model: string,
+  ): Promise<string> {
+    const compressionService = new ChatCompressionService();
+    return compressionService.summarizeForRecipient(history, config, model);
   }
 }
 

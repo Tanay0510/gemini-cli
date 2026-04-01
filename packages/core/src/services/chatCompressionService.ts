@@ -478,6 +478,75 @@ export class ChatCompressionService {
   }
 
   /**
+   * Generates a detailed briefing of the conversation for a new recipient.
+   * Unlike `summarize()` which produces a short label, this generates a rich
+   * structured briefing covering objective, decisions, status, and next steps.
+   * Output is plain text (no markdown) suitable for terminal rendering.
+   */
+  async summarizeForRecipient(
+    history: readonly Content[],
+    config: Config,
+    model: string,
+    abortSignal?: AbortSignal,
+  ): Promise<string> {
+    const dialogue = history
+      .filter((turn) => turn.role && turn.role !== 'system')
+      .map((turn) => {
+        const text = turn.parts?.[0]?.text || '';
+        return `${turn.role!.toUpperCase()}: ${text}`;
+      })
+      .join('\n')
+      .slice(-20000); // Allow more context than the label summarizer
+
+    const response = await config.getBaseLlmClient().generateContent({
+      modelConfigKey: { model: modelStringToModelConfigAlias(model) },
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text:
+                'A teammate has shared their conversation context with you. ' +
+                'Write a concise technical briefing so you can understand their work and continue it seamlessly.\n\n' +
+                'STRICT FORMATTING RULES:\n' +
+                '- Use PLAIN TEXT only. No markdown. No **bold**, no *italic*, no backtick code spans.\n' +
+                '- Each section header must be on its own line, exactly as shown below (emoji + label).\n' +
+                '- Use "•" for bullet points.\n' +
+                '- Do not add blank lines between bullets within a section.\n' +
+                '- One blank line between sections only.\n\n' +
+                'OUTPUT FORMAT (copy these headers exactly):\n\n' +
+                '🎯 Objective\n' +
+                '<1-2 sentences describing the problem they were solving>\n\n' +
+                '🔧 Work Done\n' +
+                '• <specific file, function, or change — one per bullet>\n' +
+                '• <another item>\n\n' +
+                '✅ Key Decisions\n' +
+                '• <a technical decision and the reason behind it>\n' +
+                '• <another decision>\n\n' +
+                '📍 Current Status\n' +
+                '<1-2 sentences on where things stand right now>\n\n' +
+                '🔜 Next Steps\n' +
+                '• <a concrete remaining task or open question>\n' +
+                '• <another task>\n\n' +
+                'Be specific. Mention real file names, function names, or error messages.\n\n' +
+                `CONVERSATION:\n${dialogue}\n\nBRIEFING:`,
+            },
+          ],
+        },
+      ],
+      promptId: 'inbox-load-briefing',
+      role: LlmRole.UTILITY_COMPRESSOR,
+      abortSignal: abortSignal ?? new AbortController().signal,
+    });
+
+    return (
+      getResponseText(response)
+        ?.trim()
+        .replace(/^"(.*)"$/, '$1') || ''
+    );
+  }
+
+  /**
    * Generates a very short (5-7 word) summary of the dialogue to use as a label.
    */
   async summarize(

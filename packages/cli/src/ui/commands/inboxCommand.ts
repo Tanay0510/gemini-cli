@@ -6,6 +6,7 @@
 
 import * as os from 'node:os';
 import { MessageType } from '../types.js';
+import type { HistoryItemContextBriefing } from '../types.js';
 import {
   CommandKind,
   type SlashCommand,
@@ -192,16 +193,64 @@ const loadSubCommand: SlashCommand = {
       // Remove from local cache so it doesn't show stale
       cachedInbox = cachedInbox.filter((_, i) => i !== index);
 
+      // Generate a recipient-oriented briefing of the loaded context
       ui.addItem(
         {
           type: MessageType.INFO,
-          text: [
-            `✓ Context from @${entry.from} loaded.`,
-            `You now have their conversation history. Continue from where they left off.`,
-          ].join('\n'),
+          text: 'Analyzing loaded context…',
         },
         Date.now(),
       );
+
+      const agentCtx = context.services.agentContext;
+      const config = agentCtx?.config;
+      const model = agentCtx?.config.getModel() ?? 'gemini-2.0-flash';
+
+      let briefingSummary: string | null = null;
+      if (config) {
+        try {
+          briefingSummary = await shareService.summarizeShared(
+            history,
+            config,
+            model,
+          );
+        } catch (briefingErr) {
+          // Summarization is best-effort; don't fail the load if it errors
+          const errMsg =
+            briefingErr instanceof Error
+              ? briefingErr.message
+              : String(briefingErr);
+          ui.addItem(
+            {
+              type: MessageType.WARNING,
+              text: `Could not generate context briefing: ${errMsg}`,
+            },
+            Date.now(),
+          );
+        }
+      }
+
+      if (briefingSummary) {
+        const briefingItem: HistoryItemContextBriefing = {
+          type: 'context_briefing',
+          from: entry.from,
+          model: entry.model,
+          summary: briefingSummary,
+        };
+        ui.addItem(briefingItem, Date.now());
+      } else {
+        // Fallback plain message when briefing is unavailable
+        ui.addItem(
+          {
+            type: MessageType.INFO,
+            text: [
+              `✓ Context from @${entry.from} loaded.`,
+              `You now have their conversation history. Continue from where they left off.`,
+            ].join('\n'),
+          },
+          Date.now(),
+        );
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       ui.addItem(

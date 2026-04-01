@@ -285,6 +285,16 @@ export type HistoryItemHint = HistoryItemBase & {
   text: string;
 };
 
+export type HistoryItemContextBriefing = HistoryItemBase & {
+  type: 'context_briefing';
+  /** The sender's identity (name or email). */
+  from: string;
+  /** The model used in the original conversation. */
+  model: string;
+  /** The AI-generated recipient briefing text (may contain markdown). */
+  summary: string;
+};
+
 export type HistoryItemChatList = HistoryItemBase & {
   type: 'chat_list';
   chats: ChatDetail[];
@@ -395,7 +405,8 @@ export type HistoryItemWithoutId =
   | HistoryItemMcpStatus
   | HistoryItemChatList
   | HistoryItemThinking
-  | HistoryItemHint;
+  | HistoryItemHint
+  | HistoryItemContextBriefing;
 
 export type HistoryItem = HistoryItemWithoutId & { id: number };
 

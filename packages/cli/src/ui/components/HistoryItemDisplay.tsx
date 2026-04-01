@@ -37,6 +37,7 @@ import { ThinkingMessage } from './messages/ThinkingMessage.js';
 import { HintMessage } from './messages/HintMessage.js';
 import { getInlineThinkingMode } from '../utils/inlineThinkingMode.js';
 import { useSettings } from '../contexts/SettingsContext.js';
+import { ContextBriefingDisplay } from './ContextBriefingDisplay.js';
 
 interface HistoryItemDisplayProps {
   item: HistoryItem;
@@ -245,6 +246,13 @@ export const HistoryItemDisplay: React.FC<HistoryItemDisplayProps> = ({
       )}
       {itemForDisplay.type === 'chat_list' && (
         <ChatList chats={itemForDisplay.chats} />
+      )}
+      {itemForDisplay.type === 'context_briefing' && (
+        <ContextBriefingDisplay
+          from={itemForDisplay.from}
+          model={itemForDisplay.model}
+          summary={itemForDisplay.summary}
+        />
       )}
     </Box>
   );
