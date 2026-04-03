@@ -29,6 +29,28 @@ describe('GcsProvider', () => {
     vi.clearAllMocks();
   });
 
+  describe('Constructor', () => {
+    it('strips gs:// prefix and trailing slashes from the bucket name', () => {
+      const provider1 = new GcsProvider('gs://my-bucket');
+      expect(provider1['bucketName']).toBe('my-bucket');
+
+      const provider2 = new GcsProvider('my-other-bucket/');
+      expect(provider2['bucketName']).toBe('my-other-bucket');
+
+      const provider3 = new GcsProvider('gs://complex-bucket/nested/');
+      expect(provider3['bucketName']).toBe('complex-bucket/nested');
+    });
+
+    it('throws if the bucket name is empty after stripping', () => {
+      expect(() => new GcsProvider('gs://')).toThrow(
+        'GcsProvider requires a bucket name.',
+      );
+      expect(() => new GcsProvider('')).toThrow(
+        'GcsProvider requires a bucket name.',
+      );
+    });
+  });
+
   describe('upload()', () => {
     it('generates a valid RFC 2387 multipart/related request body', async () => {
       mockFetch.mockResolvedValueOnce({ ok: true });
@@ -71,7 +93,7 @@ describe('GcsProvider', () => {
         json: vi.fn().mockResolvedValue({
           items: [
             {
-              name: 'abc123/share--from--expert_coder--model--gemini_3--1711929600000.json',
+              name: 'inbox/abc123/share--from--expert_coder--model--gemini_3--1711929600000.json',
               // metadata is missing!
             },
           ],
@@ -83,6 +105,8 @@ describe('GcsProvider', () => {
 
       // Verify the regex fallback logic actually works
       expect(results).toHaveLength(1);
+      const [url] = mockFetch.mock.calls[0] as [string];
+      expect(url).toContain('prefix=inbox%2F');
       expect(results[0]?.from).toBe('expert_coder');
       expect(results[0]?.model).toBe('gemini_3');
       expect(results[0]?.timestamp).toBe(1711929600000);
@@ -94,7 +118,7 @@ describe('GcsProvider', () => {
         json: vi.fn().mockResolvedValue({
           items: [
             {
-              name: 'hash/share--from--user_with_spaces--12345.json',
+              name: 'inbox/hash/share--from--user_with_spaces--12345.json',
             },
           ],
         }),

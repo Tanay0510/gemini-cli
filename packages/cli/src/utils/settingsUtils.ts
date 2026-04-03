@@ -283,6 +283,17 @@ export function getDisplayValue(
 
   let valueString = String(value);
 
+  // If the value is undefined or an empty string, show the emptyValueLabel if one is provided
+  if (
+    (value === undefined || value === '') &&
+    definition?.emptyValueLabel !== undefined
+  ) {
+    valueString = definition.emptyValueLabel;
+  } else if (value === undefined) {
+    // If not set and no emptyValueLabel is provided, show (Not set)
+    valueString = '(Not set)';
+  }
+
   // Handle object types by stringifying them
   if (
     definition?.type === 'object' &&

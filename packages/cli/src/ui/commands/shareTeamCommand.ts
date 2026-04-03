@@ -11,7 +11,6 @@ import {
   type SlashCommand,
   type CommandContext,
 } from './types.js';
-import { SettingScope } from '../../config/settings.js';
 import {
   ContextShareService,
   resolveUserIdentity,
@@ -50,7 +49,12 @@ function createShareService(
   const agentCtx = context.services.agentContext;
   const contentGeneratorConfig = agentCtx?.config.getContentGeneratorConfig();
   if (!contentGeneratorConfig) return null;
-  const bucket = agentCtx?.config.getShareSettings().bucket;
+
+  const mergedSettings = context.services.settings.merged;
+  const bucket =
+    mergedSettings.admin?.share?.bucket ??
+    agentCtx?.config.getShareSettings().bucket;
+
   return new ContextShareService({ config: contentGeneratorConfig, bucket });
 }
 
@@ -62,7 +66,7 @@ function createShareService(
 export const shareTeamCommand: SlashCommand = {
   name: 'share',
   description:
-    'Share context with teammates. Usage: /share @<teammate> [label] | --add @<email> | --sync | --list',
+    'Share context with teammates. Usage: /share @<teammate> [label]',
   kind: CommandKind.BUILT_IN,
   autoExecute: true,
   takesArgs: true,
@@ -89,21 +93,8 @@ export const shareTeamCommand: SlashCommand = {
 
     // Handle flag completions
     if (lastToken.startsWith('--')) {
-      const flags = [
-        '--add',
-        '--remove',
-        '--list',
-        '--label',
-        '--verify',
-        '--allow',
-        '--disallow',
-        '--sync',
-      ];
+      const flags = ['--sync', '--list'];
       return flags.filter((f) => f.startsWith(lastToken));
-    }
-
-    if (tokens[tokens.length - 2] === '--verify') {
-      return ['on', 'off'].filter((v) => v.startsWith(lastToken));
     }
 
     const partial = lastToken.startsWith('@') ? lastToken.slice(1) : lastToken;
@@ -121,9 +112,24 @@ export const shareTeamCommand: SlashCommand = {
     const tokens = args.trim().split(/\s+/);
     const cmd = tokens[0];
 
-    const shareSettings =
-      agentCtx?.config.getShareSettings() ?? services.settings.merged.share;
-    if (shareSettings.enabled === false) {
+    const mergedSettings = services.settings.merged;
+    const adminShare = mergedSettings.admin?.share;
+    const userShare =
+      agentCtx?.config.getShareSettings() ?? mergedSettings.share;
+
+    // Admin-level disable takes precedence
+    if (adminShare?.enabled === false) {
+      ui.addItem(
+        {
+          type: MessageType.ERROR,
+          text: 'Team sharing has been disabled by your administrator.',
+        },
+        Date.now(),
+      );
+      return;
+    }
+
+    if (userShare?.enabled === false) {
       ui.addItem(
         {
           type: MessageType.ERROR,
@@ -136,40 +142,9 @@ export const shareTeamCommand: SlashCommand = {
 
     const shareService = createShareService(context);
 
-    // --- Handle Configuration & Management Flags ---
+    // --- Handle Management Flags ---
 
-    // 1. Teammate Management: /share --add @email | /share --remove @email
-    if (cmd === '--add' || cmd === '--remove') {
-      const email = tokens[1]?.replace(/^@/, '');
-      if (!email) {
-        ui.addItem(
-          { type: MessageType.ERROR, text: `Usage: /share ${cmd} @email` },
-          Date.now(),
-        );
-        return;
-      }
-      const currentTeammates = new Set(
-        services.settings.merged.share?.teammates ?? [],
-      );
-      if (cmd === '--add') currentTeammates.add(email);
-      else currentTeammates.delete(email);
-
-      services.settings.setValue(
-        SettingScope.User,
-        'share.teammates',
-        Array.from(currentTeammates),
-      );
-      ui.addItem(
-        {
-          type: MessageType.INFO,
-          text: `✓ Teammate ${cmd === '--add' ? 'added' : 'removed'}: ${email}`,
-        },
-        Date.now(),
-      );
-      return;
-    }
-
-    // 2. Directory Sync: /share --sync
+    // 1. Directory Sync: /share --sync
     if (cmd === '--sync') {
       if (!shareService) {
         ui.addItem(
@@ -199,63 +174,7 @@ export const shareTeamCommand: SlashCommand = {
       return;
     }
 
-    // 3. Verification Policy: /share --verify on|off
-    if (cmd === '--verify') {
-      const value = tokens[1]?.toLowerCase();
-      if (value !== 'on' && value !== 'off') {
-        ui.addItem(
-          { type: MessageType.ERROR, text: 'Usage: /share --verify on|off' },
-          Date.now(),
-        );
-        return;
-      }
-      services.settings.setValue(
-        SettingScope.User,
-        'share.requireVerification',
-        value === 'on',
-      );
-      ui.addItem(
-        {
-          type: MessageType.INFO,
-          text: `✓ Sharing policy updated: Identity verification is now ${value.toUpperCase()}.`,
-        },
-        Date.now(),
-      );
-      return;
-    }
-
-    // 4. Domain Whitelisting: /share --allow google.com | /share --disallow google.com
-    if (cmd === '--allow' || cmd === '--disallow') {
-      const domain = tokens[1]?.toLowerCase();
-      if (!domain) {
-        ui.addItem(
-          { type: MessageType.ERROR, text: `Usage: /share ${cmd} <domain>` },
-          Date.now(),
-        );
-        return;
-      }
-      const currentDomains = new Set(
-        services.settings.merged.share?.allowedDomains ?? [],
-      );
-      if (cmd === '--allow') currentDomains.add(domain);
-      else currentDomains.delete(domain);
-
-      services.settings.setValue(
-        SettingScope.User,
-        'share.allowedDomains',
-        Array.from(currentDomains),
-      );
-      ui.addItem(
-        {
-          type: MessageType.INFO,
-          text: `✓ Allowed domains updated. ${cmd === '--allow' ? 'Added' : 'Removed'}: ${domain}`,
-        },
-        Date.now(),
-      );
-      return;
-    }
-
-    // 5. Status Report: /share --list
+    // 2. Status Report: /share --list
     if (cmd === '--list') {
       const settings = services.settings.merged.share;
       const localTeammates = settings?.teammates ?? [];
@@ -277,7 +196,9 @@ export const shareTeamCommand: SlashCommand = {
         'Frequent Teammates (Local):',
         ...(localTeammates.length > 0
           ? localTeammates.map((t) => `  • @${t}`)
-          : ['  (No local teammates added yet. Use /share --add @email)']),
+          : [
+              '  (No local teammates added yet. Manage teammates in /settings)',
+            ]),
       ];
 
       ui.addItem(
@@ -292,7 +213,7 @@ export const shareTeamCommand: SlashCommand = {
       ui.addItem(
         {
           type: MessageType.ERROR,
-          text: 'Usage: /share @<teammate> [label]\nFlags: --add, --sync, --verify on|off, --allow <domain>, --list',
+          text: 'Usage: /share @<teammate> [label]\nConfigure sharing policies and teammates in /settings (Team Sharing).',
         },
         Date.now(),
       );
@@ -362,11 +283,14 @@ export const shareTeamCommand: SlashCommand = {
       return;
     }
 
-    const fromName = resolveUserIdentity(shareSettings, os.userInfo().username);
+    const fromName = resolveUserIdentity(
+      userShare ?? {},
+      os.userInfo().username,
+    );
 
     // --- Validate Settings (Domains & Verification) ---
-    const allowedDomains = shareSettings.allowedDomains ?? [];
-    const requireVerification = shareSettings.requireVerification ?? false;
+    const allowedDomains = userShare?.allowedDomains ?? [];
+    const requireVerification = userShare?.requireVerification ?? false;
 
     const normalizedRecipients = recipients.map((r) =>
       normalizeRecipient(r, fromName),

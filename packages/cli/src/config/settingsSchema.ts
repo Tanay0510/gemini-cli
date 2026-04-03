@@ -107,6 +107,8 @@ export interface SettingDefinition {
   childKey?: string;
   key?: string;
   properties?: SettingsSchema;
+  /** Optional label to show in the UI when the value is undefined or empty. */
+  emptyValueLabel?: string;
   showInDialog?: boolean;
   ignoreInDocs?: boolean;
   mergeStrategy?: MergeStrategy;
@@ -1982,7 +1984,7 @@ const SETTINGS_SCHEMA = {
         requiresRestart: true,
         default: true,
         description: 'Enable local and remote subagents.',
-        showInDialog: false,
+        showInDialog: true,
       },
       worktrees: {
         type: 'boolean',
@@ -2692,6 +2694,38 @@ const SETTINGS_SCHEMA = {
           },
         },
       },
+      share: {
+        type: 'object',
+        label: 'Share Settings',
+        category: 'Admin',
+        requiresRestart: false,
+        default: {},
+        description: 'Sharing-specific admin settings.',
+        showInDialog: false,
+        mergeStrategy: MergeStrategy.REPLACE,
+        properties: {
+          enabled: {
+            type: 'boolean',
+            label: 'Share Enabled',
+            category: 'Admin',
+            requiresRestart: false,
+            default: true,
+            description: 'If false, disallows context sharing from being used.',
+            showInDialog: false,
+            mergeStrategy: MergeStrategy.REPLACE,
+          },
+          bucket: {
+            type: 'string',
+            label: 'Shared Bucket URI',
+            category: 'Admin',
+            requiresRestart: false,
+            default: undefined as string | undefined,
+            description: 'Admin-configured GCS bucket for context sharing.',
+            showInDialog: false,
+            mergeStrategy: MergeStrategy.REPLACE,
+          },
+        },
+      },
     },
   },
   share: {
@@ -2701,12 +2735,12 @@ const SETTINGS_SCHEMA = {
     requiresRestart: false,
     default: {},
     description: 'Settings for sharing conversation context with teammates.',
-    showInDialog: true,
+    showInDialog: false,
     properties: {
       enabled: {
         type: 'boolean',
         label: 'Enable Sharing',
-        category: 'General',
+        category: 'Team Sharing',
         requiresRestart: false,
         default: true,
         description: 'Enable /share and /inbox collaboration features.',
@@ -2715,7 +2749,7 @@ const SETTINGS_SCHEMA = {
       autoSyncDirectory: {
         type: 'boolean',
         label: 'Auto-Sync Directory',
-        category: 'General',
+        category: 'Team Sharing',
         requiresRestart: false,
         default: true,
         description:
@@ -2725,7 +2759,7 @@ const SETTINGS_SCHEMA = {
       autoSyncInbox: {
         type: 'boolean',
         label: 'Auto-Sync Inbox',
-        category: 'General',
+        category: 'Team Sharing',
         requiresRestart: false,
         default: true,
         description: 'Check for new shares automatically on startup.',
@@ -2734,7 +2768,7 @@ const SETTINGS_SCHEMA = {
       showNotifications: {
         type: 'boolean',
         label: 'Show Inbox Notifications',
-        category: 'General',
+        category: 'Team Sharing',
         requiresRestart: false,
         default: true,
         description: 'Show a message when new shared contexts are found.',
@@ -2743,7 +2777,7 @@ const SETTINGS_SCHEMA = {
       myName: {
         type: 'string',
         label: 'My Name',
-        category: 'General',
+        category: 'Team Sharing',
         requiresRestart: false,
         default: undefined as string | undefined,
         description:
@@ -2754,7 +2788,7 @@ const SETTINGS_SCHEMA = {
       teammates: {
         type: 'array',
         label: 'Teammates',
-        category: 'General',
+        category: 'Team Sharing',
         requiresRestart: false,
         default: [] as string[],
         description:
@@ -2766,18 +2800,19 @@ const SETTINGS_SCHEMA = {
       bucket: {
         type: 'string',
         label: 'Shared Bucket URI',
-        category: 'General',
+        category: 'Team Sharing',
         requiresRestart: false,
         default: undefined as string | undefined,
         description:
           'GCS bucket for enterprise sharing (e.g. "gs://my-team-bucket"). ' +
           'If empty, a bucket will be automatically discovered from your email domain.',
+        emptyValueLabel: '(Auto-discovered)',
         showInDialog: true,
       },
       requireVerification: {
         type: 'boolean',
         label: 'Require Verification',
-        category: 'Security',
+        category: 'Team Sharing',
         requiresRestart: false,
         default: false,
         description:
@@ -2787,11 +2822,12 @@ const SETTINGS_SCHEMA = {
       allowedDomains: {
         type: 'array',
         label: 'Allowed Domains',
-        category: 'Security',
+        category: 'Team Sharing',
         requiresRestart: false,
         default: [] as string[],
         description:
           'List of domains allowed for sharing (e.g. ["google.com"]). If empty, any domain is allowed.',
+        emptyValueLabel: '(Any)',
         showInDialog: true,
         items: { type: 'string' as const },
         mergeStrategy: MergeStrategy.UNION,

@@ -80,7 +80,7 @@ import type { InjectionSource } from '../config/injectionService.js';
 /** A callback function to report on agent activity. */
 export type ActivityCallback = (activity: SubagentActivityEvent) => void;
 
-const TASK_COMPLETE_TOOL_NAME = 'complete_task';
+export const TASK_COMPLETE_TOOL_NAME = 'complete_task';
 const GRACE_PERIOD_MS = 60 * 1000; // 1 min
 
 /** The possible outcomes of a single agent turn. */

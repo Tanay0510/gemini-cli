@@ -83,6 +83,9 @@ import {
   logBillingEvent,
   ApiKeyUpdatedEvent,
   type InjectionSource,
+  KnowledgeService,
+  GcsProvider,
+  UserAccountManager,
 } from '@google/gemini-cli-core';
 import { validateAuthMethod } from '../config/auth.js';
 import process from 'node:process';
@@ -773,6 +776,56 @@ export const AppContainer = (props: AppContainerProps) => {
       setAuthContext({});
     }
   }, [authState, authContext, setAuthState]);
+
+  // Check for teammate knowledge requests periodically
+  useEffect(() => {
+    if (
+      authState !== AuthState.Authenticated ||
+      !settings.merged.share?.enabled
+    ) {
+      return;
+    }
+
+    const checkRequests = async () => {
+      try {
+        const email = new UserAccountManager().getCachedGoogleAccount();
+        const bucket =
+          settings.merged.admin?.share?.bucket ?? settings.merged.share?.bucket;
+
+        if (!email || !bucket) return;
+
+        const knowledgeService = new KnowledgeService(
+          new GcsProvider(bucket),
+          config.getBaseLlmClient(),
+        );
+
+        const requests = await knowledgeService.listPendingRequests(email);
+        if (requests.length > 0) {
+          historyManager.addItem(
+            {
+              type: MessageType.INFO,
+              text: `📬 You have ${requests.length} pending teammate knowledge request(s). Run /ask --list-requests to view.`,
+            },
+            Date.now(),
+          );
+        }
+      } catch (err) {
+        debugLogger.warn('Failed to check pending requests:', err);
+      }
+    };
+
+    // Check on startup and every 5 minutes
+    void checkRequests();
+    const interval = setInterval(checkRequests, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [
+    authState,
+    settings.merged.share?.enabled,
+    settings.merged.admin?.share?.bucket,
+    settings.merged.share?.bucket,
+    config,
+    historyManager,
+  ]);
 
   const {
     proQuotaRequest,

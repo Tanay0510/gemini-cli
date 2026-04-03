@@ -13,3 +13,21 @@ export interface AgentHistoryProviderConfig {
   isSummarizationEnabled: boolean;
   isTruncationEnabled: boolean;
 }
+
+export interface KnowledgeSnippet {
+  id: string;
+  userEmailHash: string;
+  summary: string;
+  tags: string[];
+  timestamp: number;
+  model: string;
+}
+
+export interface KnowledgeRequest {
+  id: string;
+  fromEmail: string;
+  fromEmailHash: string;
+  query: string;
+  timestamp: number;
+  status: 'pending' | 'fulfilled' | 'denied';
+}

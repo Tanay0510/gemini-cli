@@ -14,6 +14,7 @@ import { loadAgentsFromDirectory } from './agentLoader.js';
 import { CodebaseInvestigatorAgent } from './codebase-investigator.js';
 import { CliHelpAgent } from './cli-help-agent.js';
 import { GeneralistAgent } from './generalist-agent.js';
+import { TeamIntelligenceAgent } from './team-intelligence.js';
 import { BrowserAgentDefinition } from './browser/browserAgentDefinition.js';
 import { MemoryManagerAgent } from './memory-manager-agent.js';
 import { A2AAuthProviderFactory } from './auth-provider/factory.js';
@@ -252,6 +253,8 @@ export class AgentRegistry {
     this.registerLocalAgent(CodebaseInvestigatorAgent(this.config));
     this.registerLocalAgent(CliHelpAgent(this.config));
     this.registerLocalAgent(GeneralistAgent(this.config));
+    debugLogger.log('[AgentRegistry] Registering TeamIntelligenceAgent');
+    this.registerLocalAgent(TeamIntelligenceAgent(this.config));
 
     // Register the browser agent if enabled in settings.
     // Tools are configured dynamically at invocation time via browserAgentFactory.
@@ -331,11 +334,9 @@ export class AgentRegistry {
       this.config.getAgentsSettings().overrides?.[definition.name];
 
     if (!this.isAgentEnabled(definition, settingsOverrides)) {
-      if (this.config.getDebugMode()) {
-        debugLogger.log(
-          `[AgentRegistry] Skipping disabled agent '${definition.name}'`,
-        );
-      }
+      debugLogger.log(
+        `[AgentRegistry] Skipping disabled agent '${definition.name}' (experimental=${definition.experimental}, override=${settingsOverrides?.enabled})`,
+      );
       return;
     }
 
@@ -669,7 +670,11 @@ export class AgentRegistry {
    * Returns all active agent definitions.
    */
   getAllDefinitions(): AgentDefinition[] {
-    return Array.from(this.agents.values());
+    const all = Array.from(this.agents.values());
+    debugLogger.log(
+      `[AgentRegistry] getAllDefinitions returning ${all.length} agents: ${all.map((a) => a.name).join(', ')}`,
+    );
+    return all;
   }
 
   /**

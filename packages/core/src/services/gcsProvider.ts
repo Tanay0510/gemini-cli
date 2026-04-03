@@ -36,11 +36,15 @@ interface GcsOrgDirectoryResponse {
  */
 export class GcsProvider implements ContextStorageProvider {
   private auth: GoogleAuth | undefined;
+  private readonly bucketName: string;
 
-  constructor(private readonly bucketName: string) {
-    if (!bucketName) {
+  constructor(bucketName: string) {
+    // Accept "gs://bucket-name" or just "bucket-name"
+    const cleaned = bucketName.replace(/^gs:\/\//, '').replace(/\/$/, '');
+    if (!cleaned) {
       throw new Error('GcsProvider requires a bucket name.');
     }
+    this.bucketName = cleaned;
   }
 
   private async getAccessToken(): Promise<string> {
@@ -120,7 +124,8 @@ export class GcsProvider implements ContextStorageProvider {
   async list(recipientEmail: string): Promise<SharedContextEnvelope[]> {
     const token = await this.getAccessToken();
     const results: SharedContextEnvelope[] = [];
-    const prefix = `${createHash('sha256').update(recipientEmail).digest('hex')}/`;
+    const hash = createHash('sha256').update(recipientEmail).digest('hex');
+    const prefix = `inbox/${hash}/`;
 
     let pageToken: string | undefined;
     do {
@@ -184,6 +189,13 @@ export class GcsProvider implements ContextStorageProvider {
   }
 
   async download(fileName: string): Promise<Content[]> {
+    return this.downloadJson<Content[]>(fileName);
+  }
+
+  /**
+   * Generic JSON downloader for any path in the bucket.
+   */
+  async downloadJson<T>(fileName: string): Promise<T> {
     const token = await this.getAccessToken();
     const url =
       `${GCS_BASE}/b/${encodeURIComponent(this.bucketName)}/o/` +
@@ -196,18 +208,79 @@ export class GcsProvider implements ContextStorageProvider {
     if (!response.ok) {
       const errorBody = await response.text().catch(() => '');
       throw new Error(
-        `Failed to download shared context from GCS (HTTP ${response.status}): ${errorBody}`,
+        `Failed to download from GCS (HTTP ${response.status}): ${errorBody}`,
       );
     }
 
     try {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
-      return (await response.json()) as Content[];
+      return (await response.json()) as T;
     } catch {
       throw new Error(
-        'Failed to parse shared context. The content may be corrupted or too large to extract.',
+        'Failed to parse JSON content from GCS. Content may be corrupted.',
       );
     }
+  }
+
+  /**
+   * Generic JSON uploader for any path in the bucket.
+   */
+  async uploadJson(fileName: string, data: unknown): Promise<void> {
+    const token = await this.getAccessToken();
+    const body = JSON.stringify(data);
+    const url = `${GCS_UPLOAD_BASE}/b/${encodeURIComponent(this.bucketName)}/o?uploadType=media&name=${encodeURIComponent(fileName)}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body,
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(
+        `Failed to upload to GCS (HTTP ${response.status}): ${errorBody}`,
+      );
+    }
+  }
+
+  /**
+   * Generic list operation with prefix.
+   */
+  async listWithPrefix(prefix: string): Promise<GcsObject[]> {
+    const token = await this.getAccessToken();
+    const results: GcsObject[] = [];
+
+    let pageToken: string | undefined;
+    do {
+      const url =
+        `${GCS_BASE}/b/${encodeURIComponent(this.bucketName)}/o` +
+        `?prefix=${encodeURIComponent(prefix)}&projection=full` +
+        (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '');
+
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => '');
+        throw new Error(
+          `Failed to list GCS bucket (HTTP ${response.status}): ${errorBody}`,
+        );
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      const data = (await response.json()) as GcsListResponse;
+      if (data.items) {
+        results.push(...data.items);
+      }
+      pageToken = data.nextPageToken;
+    } while (pageToken);
+
+    return results;
   }
 
   async delete(fileName: string): Promise<void> {
@@ -261,7 +334,9 @@ function objectName(
   timestamp: number,
 ): string {
   const hash = createHash('sha256').update(to).digest('hex');
-  const safeFrom = from.replace(/[^a-zA-Z0-9]/g, '_');
-  const safeModel = model.replace(/[^a-zA-Z0-9]/g, '_');
-  return `${hash}/share--from--${safeFrom}--model--${safeModel}--${timestamp}.json`;
+  const safeFrom = from.replace(/[^a-zA-Z0-9@._-]/g, '_');
+  const safeModel = model
+    .replace(/models\//, '')
+    .replace(/[^a-zA-Z0-9._-]/g, '_');
+  return `inbox/${hash}/share--from--${safeFrom}--model--${safeModel}--${timestamp}.json`;
 }

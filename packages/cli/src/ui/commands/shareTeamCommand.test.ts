@@ -8,9 +8,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { shareTeamCommand } from './shareTeamCommand.js';
 import { createMockCommandContext } from '../../test-utils/mockCommandContext.js';
 import { MessageType } from '../types.js';
-import { SettingScope } from '../../config/settings.js';
 import type { CommandContext } from './types.js';
-import type { ShareSettings } from '@google/gemini-cli-core';
+import {
+  ContextShareService,
+  type ShareSettings,
+} from '@google/gemini-cli-core';
 
 const {
   mockShare,
@@ -212,24 +214,70 @@ describe('shareTeamCommand - Logic Validation', () => {
     });
   });
 
-  describe('Configuration State Logic', () => {
-    it('--verify on updates the user settings store correctly', async () => {
+  describe('Management Flags Logic', () => {
+    it('--verify on shows redirection error', async () => {
       await shareTeamCommand.action!(ctx, '--verify on');
 
-      expect(ctx.services.settings.setValue).toHaveBeenCalledWith(
-        SettingScope.User,
-        'share.requireVerification',
-        true,
+      expect(ctx.ui.addItem).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining(
+            'Configure sharing policies and teammates in /settings',
+          ),
+        }),
+        expect.any(Number),
       );
     });
 
-    it('--allow adds domain to the list', async () => {
-      await shareTeamCommand.action!(ctx, '--allow b.com');
+    it('--add shows redirection error', async () => {
+      await shareTeamCommand.action!(ctx, '--add @alice');
 
-      expect(ctx.services.settings.setValue).toHaveBeenCalledWith(
-        SettingScope.User,
-        'share.allowedDomains',
-        expect.arrayContaining(['b.com']),
+      expect(ctx.ui.addItem).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining(
+            'Configure sharing policies and teammates in /settings',
+          ),
+        }),
+        expect.any(Number),
+      );
+    });
+
+    it('--sync calls the share service to sync organizational directory', async () => {
+      const mockSync = vi.fn().mockResolvedValue(['user1@co.com']);
+
+      // Use createMockCommandContext with overrides to avoid spreading class instances
+      const syncCtx = createMockCommandContext({
+        services: {
+          agentContext: {
+            config: {
+              getContentGeneratorConfig: vi
+                .fn()
+                .mockReturnValue({ authType: 'google-oauth' }),
+              getShareSettings: vi.fn().mockReturnValue({ enabled: true }),
+              getGeminiClient: vi.fn().mockReturnValue({}),
+            },
+          },
+        },
+      });
+
+      // Mock createShareService indirectly by providing necessary fields
+      vi.mocked(ContextShareService).mockImplementation(
+        () =>
+          ({
+            syncOrgDirectory: mockSync,
+            getOrgDirectory: vi.fn(),
+            getProviderName: vi.fn(),
+            share: vi.fn(),
+          }) as unknown as ContextShareService,
+      );
+
+      await shareTeamCommand.action!(syncCtx, '--sync');
+
+      expect(mockSync).toHaveBeenCalled();
+      expect(syncCtx.ui.addItem).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining('Synced 1 teammates'),
+        }),
+        expect.any(Number),
       );
     });
   });

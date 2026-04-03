@@ -40,7 +40,8 @@ export class GCSTaskStore implements TaskStore {
       throw new Error('GCS bucket name is required.');
     }
     this.storage = new Storage();
-    this.bucketName = bucketName;
+    // Accept "gs://bucket-name" or just "bucket-name"
+    this.bucketName = bucketName.replace(/^gs:\/\//, '').replace(/\/$/, '');
     logger.info(`GCSTaskStore initializing with bucket: ${this.bucketName}`);
     // Prerequisites: user account or service account must have storage admin IAM role
     // and the bucket name must be unique.

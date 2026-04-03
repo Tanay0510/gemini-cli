@@ -42,6 +42,10 @@ import {
   shouldHideToolCall,
   UPDATE_TOPIC_TOOL_NAME,
   UPDATE_TOPIC_DISPLAY_NAME,
+  KnowledgeService,
+  UserAccountManager,
+  GcsProvider,
+  TASK_COMPLETE_TOOL_NAME,
 } from '@google/gemini-cli-core';
 import type {
   Config,
@@ -57,7 +61,12 @@ import type {
   GeminiErrorEventValue,
   RetryAttemptPayload,
 } from '@google/gemini-cli-core';
-import { type Part, type PartListUnion, FinishReason } from '@google/genai';
+import {
+  type Content,
+  type Part,
+  type PartListUnion,
+  FinishReason,
+} from '@google/genai';
 import type {
   HistoryItem,
   HistoryItemThinking,
@@ -249,6 +258,10 @@ export const useGeminiStream = (
   );
   const [isResponding, setIsRespondingState] = useState<boolean>(false);
   const isRespondingRef = useRef<boolean>(false);
+  const shareBucketUri = config.getShareSettings().bucket;
+  const adminShareBucket = settings.merged.admin?.share?.bucket;
+  const effectiveBucket = adminShareBucket ?? shareBucketUri;
+
   const setIsResponding = useCallback(
     (value: boolean) => {
       setIsRespondingState(value);
@@ -1713,6 +1726,50 @@ export const useGeminiStream = (
                   },
                 });
               }
+
+              // --- Knowledge Indexing Trigger ---
+              // Check if the agent successfully completed a task.
+              const wasTaskSuccessful = toolCalls.some(
+                (tc) =>
+                  tc.request.name === TASK_COMPLETE_TOOL_NAME &&
+                  tc.status === 'success',
+              );
+
+              if (wasTaskSuccessful && settings.merged.share?.enabled) {
+                const email = new UserAccountManager().getCachedGoogleAccount();
+
+                if (email && effectiveBucket) {
+                  // Run in background to not block the UI
+                  void (async () => {
+                    try {
+                      const knowledgeService = new KnowledgeService(
+                        new GcsProvider(effectiveBucket),
+                        config.getBaseLlmClient(),
+                      );
+                      const snippet = await knowledgeService.publishSolution({
+                        userEmail: email,
+                        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+                        history: config
+                          .getGeminiClient()
+                          .getHistory() as Content[],
+                        model: config.getModel(),
+                      });
+
+                      if (snippet) {
+                        addItem({
+                          type: MessageType.INFO,
+                          text: `💡 Solution indexed in team knowledge base: "${snippet.summary}"`,
+                        });
+                      }
+                    } catch (err) {
+                      debugLogger.warn(
+                        'Failed to index knowledge snippet:',
+                        err,
+                      );
+                    }
+                  })();
+                }
+              }
             } catch (error: unknown) {
               spanMetadata.error = error;
               if (error instanceof UnauthorizedError) {
@@ -1766,6 +1823,9 @@ export const useGeminiStream = (
       maybeAddSuppressedToolErrorNote,
       maybeAddLowVerbosityFailureNote,
       settings.merged.billing?.overageStrategy,
+      settings.merged.share?.enabled,
+      effectiveBucket,
+      toolCalls,
       setIsResponding,
     ],
   );

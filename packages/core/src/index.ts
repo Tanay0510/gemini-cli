@@ -141,6 +141,8 @@ export * from './services/trackerTypes.js';
 export * from './services/keychainService.js';
 export * from './services/keychainTypes.js';
 export * from './services/contextShareService.js';
+export * from './services/knowledgeService.js';
+export * from './services/types.js';
 export * from './skills/skillManager.js';
 export * from './skills/skillLoader.js';
 
@@ -181,6 +183,7 @@ export * from './agents/types.js';
 export * from './agents/agentLoader.js';
 export * from './agents/local-executor.js';
 export * from './agents/agent-scheduler.js';
+export { TASK_COMPLETE_TOOL_NAME } from './agents/local-executor.js';
 
 // Export browser session management
 export { resetBrowserSession } from './agents/browser/browserAgentFactory.js';

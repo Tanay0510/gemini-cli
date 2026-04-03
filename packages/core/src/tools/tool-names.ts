@@ -183,6 +183,7 @@ export const TRACKER_GET_TASK_TOOL_NAME = 'tracker_get_task';
 export const TRACKER_LIST_TASKS_TOOL_NAME = 'tracker_list_tasks';
 export const TRACKER_ADD_DEPENDENCY_TOOL_NAME = 'tracker_add_dependency';
 export const TRACKER_VISUALIZE_TOOL_NAME = 'tracker_visualize';
+export const TEAM_INTELLIGENCE_TOOL_NAME = 'team_intelligence';
 
 // Tool Display Names
 export const WRITE_FILE_DISPLAY_NAME = 'WriteFile';
@@ -264,6 +265,7 @@ export const ALL_BUILTIN_TOOL_NAMES = [
   ENTER_PLAN_MODE_TOOL_NAME,
   EXIT_PLAN_MODE_TOOL_NAME,
   UPDATE_TOPIC_TOOL_NAME,
+  TEAM_INTELLIGENCE_TOOL_NAME,
 ] as const;
 
 /**

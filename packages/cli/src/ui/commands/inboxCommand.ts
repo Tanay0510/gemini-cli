@@ -71,7 +71,12 @@ function createShareService(
   const agentCtx = context.services.agentContext;
   const contentGeneratorConfig = agentCtx?.config.getContentGeneratorConfig();
   if (!contentGeneratorConfig) return null;
-  const bucket = agentCtx?.config.getShareSettings().bucket;
+
+  const mergedSettings = context.services.settings.merged;
+  const bucket =
+    mergedSettings.admin?.share?.bucket ??
+    agentCtx?.config.getShareSettings().bucket;
+
   return new ContextShareService({ config: contentGeneratorConfig, bucket });
 }
 
@@ -81,7 +86,34 @@ const listSubCommand: SlashCommand = {
   kind: CommandKind.BUILT_IN,
   autoExecute: true,
   action: async (context) => {
-    const { ui } = context;
+    const { ui, services } = context;
+    const mergedSettings = services.settings.merged;
+
+    // Admin-level disable takes precedence
+    if (mergedSettings.admin?.share?.enabled === false) {
+      ui.addItem(
+        {
+          type: MessageType.ERROR,
+          text: 'Team sharing has been disabled by your administrator.',
+        },
+        Date.now(),
+      );
+      return;
+    }
+
+    const userShare =
+      services.agentContext?.config.getShareSettings() ?? mergedSettings.share;
+    if (userShare?.enabled === false) {
+      ui.addItem(
+        {
+          type: MessageType.ERROR,
+          text: 'Team sharing is currently disabled. Enable it in /settings (Team Sharing > Enable Sharing).',
+        },
+        Date.now(),
+      );
+      return;
+    }
+
     const shareService = createShareService(context);
     if (!shareService) {
       ui.addItem(
@@ -350,11 +382,25 @@ export const inboxCommand: SlashCommand = {
 
   // Running `/inbox` with no sub-command defaults to listing.
   action: async (context, args) => {
-    const shareSettings =
-      context.services.agentContext?.config.getShareSettings() ??
-      context.services.settings.merged.share;
-    if (shareSettings.enabled === false) {
-      context.ui.addItem(
+    const { ui, services } = context;
+    const mergedSettings = services.settings.merged;
+
+    // Admin-level disable takes precedence
+    if (mergedSettings.admin?.share?.enabled === false) {
+      ui.addItem(
+        {
+          type: MessageType.ERROR,
+          text: 'Team sharing has been disabled by your administrator.',
+        },
+        Date.now(),
+      );
+      return;
+    }
+
+    const userShare =
+      services.agentContext?.config.getShareSettings() ?? mergedSettings.share;
+    if (userShare?.enabled === false) {
+      ui.addItem(
         {
           type: MessageType.ERROR,
           text: 'Team sharing is currently disabled. Enable it in /settings (Team Sharing > Enable Sharing).',

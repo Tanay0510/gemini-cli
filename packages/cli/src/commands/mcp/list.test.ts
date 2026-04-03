@@ -259,6 +259,7 @@ describe('mcp list command', () => {
       secureModeEnabled: false,
       extensions: { enabled: true },
       skills: { enabled: true },
+      share: { enabled: true, bucket: undefined },
       mcp: {
         enabled: true,
         config: {
