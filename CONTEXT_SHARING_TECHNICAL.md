@@ -1,81 +1,92 @@
-# Technical Documentation: Team Context Sharing
+# Technical Documentation: Team Knowledge & Context Sharing
 
-This document provides a technical overview and in-depth code analysis of the
-context sharing feature in Gemini CLI.
-
----
-
-## 1. High-Level Overview
-
-The sharing system is designed to be "Zero-Config" for enterprise users while
-maintaining high security and privacy.
-
-### The Workflow
-
-1.  **Identity Resolution:** The CLI identifies the sender using their verified
-    Google account (if logged in) or a configured handle.
-2.  **Smart Summarization:** The CLI generates a professional TL;DR summary of
-    the conversation and prepends it to the history.
-3.  **Storage Routing:**
-    - **Enterprise:** If the user is authenticated via Vertex AI or Google
-      OAuth, the CLI automatically discovers a GCS bucket named
-      `gs://gemini-shared-<domain>` and uploads the context.
-    - **Individual:** If using an API key, it falls back to the Gemini Files
-      API.
-4.  **Hashed Inbox:** Recipients have a "Virtual Inbox" identified by the
-    SHA-256 hash of their email address.
-5.  **Retrieval:** Teammates run `/inbox` to see a list of shares and
-    `/inbox load <#>` to inject that history into their current session.
+This document provides a technical overview of the collaborative features in
+Gemini CLI, including Context Sharing and the Agent-to-Agent (A2A) Knowledge
+Pulse.
 
 ---
 
-## 2. In-Depth Technical Details
+## 1. High-Level Architecture
 
-### A. The `/share` Command
+The collaboration system uses **Google Cloud Storage (GCS)** as a serverless
+message bus and knowledge repository. It is designed for "Zero-Config"
+enterprise use.
 
-**Location:** `packages/cli/src/ui/commands/shareTeamCommand.ts`
+### The Two Pillars of Collaboration:
 
-- **Argument Parsing:** Parses multiple recipients (`@alice @bob`) and labels.
-- **Normalization:** Converts short handles into full emails based on domain.
-- **Policy Enforcement:** Enforces `allowedDomains` and `requireVerification`
-  settings before initiating any cloud requests.
-- **Summarization:** Prepends an LLM-generated summary turn to the history.
-
-### B. The `/inbox` Command
-
-**Location:** `packages/cli/src/ui/commands/inboxCommand.ts`
-
-- **Virtual View:** Lists entries via `ContextShareService` from the hashed
-  prefix.
-- **Provider Transparency:** Displays whether contexts are from GCS or Gemini
-  API.
-
-### C. ContextShareService & Providers
-
-- **Hybrid Boot Sync:** The `AppContainer` triggers a background sync on
-  startup. It uses a **Dual-Layer Cache** (local settings + cloud fetch) with a
-  4-hour TTL.
-- **GcsProvider (Multipart Upload):** Uses the `multipart/related` GCS JSON API
-  to reliably store custom metadata (`share-label`, `share-from`, etc.)
-  alongside the history JSON.
+1.  **Context Sharing (`/share` & `/inbox`):** Explicitly sending a full
+    conversation history to a specific teammate.
+2.  **A2A Knowledge Pulse (`/ask` & Auto-indexing):** Implicitly sharing
+    "learned solutions" across the team without interrupting humans.
 
 ---
 
-## 3. Configuration & Security
+## 2. Agent-to-Agent (A2A) Knowledge Pulse
 
-### Settings Schema
+### A. Automated Indexing
 
-- `share.enabled`: Global kill-switch.
-- `share.autoSyncDirectory`: Background teammate discovery.
-- `share.autoSyncInbox`: Background new-share checking.
-- `share.requireVerification`: Identity strictness.
-- `share.allowedDomains`: Domain guardrails.
+When an agent successfully completes a task (detected via the `complete_task`
+tool), the system performs an automatic "Post-Mortem":
 
-### Data Security
+1.  **Summarization:** Uses `SessionSummaryService` to generate a one-sentence
+    summary of the solution.
+2.  **Privacy Scrubbing:** Redacts local paths, secrets, and PII from the
+    summary.
+3.  **GCS Upload:** Stores a `KnowledgeSnippet` JSON at:
+    `gs://<bucket>/knowledge/<sha256(user_email)>/sol--<ts>.json`
 
-1.  **Hashed Virtual Inboxes:** Recipient email is never stored in plain text in
-    storage paths.
-2.  **Verified Signing:** Enterprise shares use the OAuth identity, making the
-    `from` field unfakeable.
-3.  **Environment Stripping:** Automatically removes `<session_context>` and
-    local system rules before sharing.
+### B. Discovery via `/ask`
+
+The `/ask @teammate <query>` command allows a user to query their team's
+collective brain:
+
+1.  **Semantic Search:** Scans the teammate's (or team's) knowledge folder and
+    uses an LLM to rank snippets by relevance to the user's query.
+2.  **Passive Request:** If no public solution is found, the agent drops a
+    `KnowledgeRequest` ticket at:
+    `gs://<bucket>/requests/<sha256(teammate_email)>/req--<id>.json`
+
+### C. Fulfillment Workflow
+
+The recipient's CLI periodically polls for requests in their `requests/` prefix.
+
+- **Notification:** The user is alerted: "You have pending teammate knowledge
+  requests."
+- **Fulfillment:** `/ask --fulfill <#>` initiates a local search of the user's
+  private history to find a match.
+
+---
+
+## 3. Context Sharing Implementation
+
+### Storage Routing
+
+- **Enterprise (OAuth/Vertex):** Uses `GcsProvider`. Automatically discovers
+  bucket `gs://gemini-shared-<domain>`.
+- **Individual (API Key):** Uses `GeminiFilesProvider` (Gemini Files API).
+
+### Path Structure (GCS)
+
+- **Inboxes:** `inbox/<sha256(recipient)>/share--from--<sender>--<ts>.json`
+- **Org Directory:** `metadata/org-directory.json`
+
+---
+
+## 4. Admin Governance & Security
+
+### Admin Policies
+
+Administrators can "lock" settings via the `admin.share` schema:
+
+- `admin.share.enabled`: Force-disable sharing for the whole org.
+- `admin.share.bucket`: Force-set a specific GCS bucket, ignoring user config.
+
+### Privacy Guardrails
+
+1.  **Hashed Identities:** Recipient emails are always hashed in cloud storage
+    paths.
+2.  **No Full History:** A2A Knowledge Pulse only shares **summaries**. Full
+    history/code never leaves the machine without explicit user consent
+    (`[y/n]`).
+3.  **Domain Whitelisting:** Users can restrict sharing to specific corporate
+    domains via `allowedDomains`.
