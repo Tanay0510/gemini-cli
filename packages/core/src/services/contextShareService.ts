@@ -27,13 +27,6 @@ export type { SharedContextEnvelope } from './contextStorageProvider.js';
 // ContextShareService
 //
 // Thin orchestration layer that delegates to a ContextStorageProvider.
-//
-// Provider selection:
-//   • If `sharedBucketUri` is set AND auth is Vertex/OAuth/ADC → GcsProvider
-//   • If `sharedBucketUri` is MISSING but auth is Vertex/OAuth/ADC →
-//     Try to discover a default bucket from user's domain.
-//   • If auth is USE_GEMINI with an API key → GeminiFilesProvider
-//   • Otherwise → error
 // --------------------------------------------------------------------------
 
 export interface ContextShareServiceOptions {
@@ -85,6 +78,32 @@ export class ContextShareService {
   }
 
   /**
+   * Fetches the organizational directory. Uses local cache if available.
+   */
+  async getOrgDirectory(config?: Config, force = false): Promise<string[]> {
+    const cached = config?.getShareSettings().orgDirectoryCache ?? [];
+
+    // If we have cache and aren't forcing, return it immediately (Hybrid Boot Part 1)
+    if (cached.length > 0 && !force) {
+      return cached;
+    }
+
+    try {
+      const directory = await this.provider.downloadOrgDirectory();
+      return directory;
+    } catch {
+      return cached;
+    }
+  }
+
+  /**
+   * Triggers a manual sync of the organizational directory.
+   */
+  async syncOrgDirectory(): Promise<string[]> {
+    return this.provider.downloadOrgDirectory();
+  }
+
+  /**
    * Serialises and uploads conversation history for a teammate.
    */
   async share(params: {
@@ -123,8 +142,7 @@ export class ContextShareService {
 
   /**
    * Generates a detailed recipient-oriented briefing from a loaded conversation
-   * history. Produces a structured summary covering objective, work done, key
-   * decisions, current status, and next steps.
+   * history.
    */
   async summarizeShared(
     history: Content[],

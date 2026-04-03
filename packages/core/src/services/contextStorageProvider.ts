@@ -54,4 +54,9 @@ export interface ContextStorageProvider {
    * Deletes a shared context entry.
    */
   delete(fileName: string): Promise<void>;
+
+  /**
+   * Downloads the organizational directory (list of teammate emails).
+   */
+  downloadOrgDirectory(): Promise<string[]>;
 }

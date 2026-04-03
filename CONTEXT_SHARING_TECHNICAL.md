@@ -1,9 +1,7 @@
 # Technical Documentation: Team Context Sharing
 
 This document provides a technical overview and in-depth code analysis of the
-context sharing feature in Gemini CLI. This feature allows users to share their
-conversation history with teammates using either Google Cloud Storage (GCS) for
-enterprise users or the Gemini Files API for individual users.
+context sharing feature in Gemini CLI.
 
 ---
 
@@ -21,7 +19,7 @@ maintaining high security and privacy.
 3.  **Storage Routing:**
     - **Enterprise:** If the user is authenticated via Vertex AI or Google
       OAuth, the CLI automatically discovers a GCS bucket named
-      `gs://gemini-shared-<domain>` and uploads the context there.
+      `gs://gemini-shared-<domain>` and uploads the context.
     - **Individual:** If using an API key, it falls back to the Gemini Files
       API.
 4.  **Hashed Inbox:** Recipients have a "Virtual Inbox" identified by the
@@ -37,109 +35,47 @@ maintaining high security and privacy.
 
 **Location:** `packages/cli/src/ui/commands/shareTeamCommand.ts`
 
-This command orchestrates the entire sharing process.
-
-- **Argument Parsing:** It parses multiple recipients (e.g., `@alice @bob`) and
-  an optional label.
-- **Normalization:** It uses `normalizeRecipient(recipient, fromName)` to
-  convert short handles like `@tnay1995` into full emails like
-  `tnay1995@gmail.com` based on the sender's domain.
-- **Environment Stripping:** It calls `stripEnvironmentContext(history)` to
-  remove bulky system rules and directory structures from the shared JSON,
-  keeping it focused on the conversation.
-- **Summarization:**
-  ```typescript
-  const summary = await geminiClient.summarizeChat();
-  const summaryTurn: Content = {
-    role: 'user',
-    parts: [{ text: `### CONVERSATION SUMMARY\n\n${summary}...` }],
-  };
-  // Prepend to history before upload
-  const historyToShare = [summaryTurn, ...cleanHistory];
-  ```
+- **Argument Parsing:** Parses multiple recipients (`@alice @bob`) and labels.
+- **Normalization:** Converts short handles into full emails based on domain.
+- **Policy Enforcement:** Enforces `allowedDomains` and `requireVerification`
+  settings before initiating any cloud requests.
+- **Summarization:** Prepends an LLM-generated summary turn to the history.
 
 ### B. The `/inbox` Command
 
 **Location:** `packages/cli/src/ui/commands/inboxCommand.ts`
 
-Provides a view into the user's "Virtual Inbox".
+- **Virtual View:** Lists entries via `ContextShareService` from the hashed
+  prefix.
+- **Provider Transparency:** Displays whether contexts are from GCS or Gemini
+  API.
 
-- **Identity Check:** It tells the user exactly which identity it is checking
-  (e.g., `Checking inbox for @tnay1995@gmail.com...`).
-- **Provider Transparency:** It fetches entries via `ContextShareService` and
-  displays whether they came from GCS or the Gemini API.
-- **Hashed Hiding:** It never exposes the recipient's email in GCS paths; it
-  only lists files within the `inbox/<sha256(email)>/` prefix.
+### C. ContextShareService & Providers
 
-### C. ContextShareService (The Router)
-
-**Location:** `packages/core/src/services/contextShareService.ts`
-
-This service acts as a thin abstraction over different storage providers.
-
-- **Zero-Config Discovery:**
-  ```typescript
-  if (isVertexOrOAuth(config.authType)) {
-    if (!bucket) {
-      const email = new UserAccountManager().getCachedGoogleAccount();
-      if (email) bucket = getDefaultSharedBucket(email); // gs://gemini-shared-domain-com
-    }
-    this.provider = new GcsProvider(bucket);
-  }
-  ```
-
-### D. GcsProvider (Enterprise Backend)
-
-**Location:** `packages/core/src/services/gcsProvider.ts`
-
-Handles the low-level GCS JSON API interactions.
-
-- **Path Logic:**
-  `inbox/<sha256(recipient)>/share--from--<sender>--model--<model>--<ts>.json`
-- **Robust Retrieval:** Since GCS metadata indexing can sometimes lag, the
-  `list()` method includes a fallback parser:
-  ```typescript
-  const match = obj.name.match(/share--from--(.+)--model--(.+)--(\d+)\.json$/);
-  if (match) {
-    // Manual parse of filename if metadata headers are missing
-  }
-  ```
-
-### E. Sharing Utilities
-
-**Location:** `packages/core/src/utils/sharingUtils.ts`
-
-Contains the pure logic for identity and path management.
-
-- **`getDefaultSharedBucket(email)`**: Converts `user@acme.com` into
-  `gs://gemini-shared-acme-com`.
-- **`resolveUserIdentity(settings, fallback)`**: Priorities: 1. Verified Google
-  Email, 2. `share.myName` setting, 3. OS Username.
-- **`stripEnvironmentContext(history)`**: Uses string matching to filter out
-  turns containing `<session_context>` or `Current Directory Structure`.
+- **Hybrid Boot Sync:** The `AppContainer` triggers a background sync on
+  startup. It uses a **Dual-Layer Cache** (local settings + cloud fetch) with a
+  4-hour TTL.
+- **GcsProvider (Multipart Upload):** Uses the `multipart/related` GCS JSON API
+  to reliably store custom metadata (`share-label`, `share-from`, etc.)
+  alongside the history JSON.
 
 ---
 
-## 3. Configuration Schema
+## 3. Configuration & Security
 
-**Location:** `packages/cli/src/config/settingsSchema.ts`
+### Settings Schema
 
-The settings were refactored for a professional "Enterprise" feel:
+- `share.enabled`: Global kill-switch.
+- `share.autoSyncDirectory`: Background teammate discovery.
+- `share.autoSyncInbox`: Background new-share checking.
+- `share.requireVerification`: Identity strictness.
+- `share.allowedDomains`: Domain guardrails.
 
-```yaml
-share:
-  myName: 'alice' # Optional: Manual identity override
-  teammates: ['bob'] # Optional: For @ completion
-  bucket: 'gs://my-bucket' # Optional: Manual GCS override
-```
+### Data Security
 
----
-
-## 4. Key Security Considerations
-
-1.  **Verified Identity:** Enterprise shares use the email from the OAuth token
-    as the `from` field, making them unfakeable.
-2.  **Private by Default:** Each user can only "see" files under their specific
-    SHA-256 prefix in GCS if IAM conditions are applied.
-3.  **Data Minimization:** By stripping the `session_context`, we avoid sharing
-    local system paths, environment variables, and proprietary extension rules.
+1.  **Hashed Virtual Inboxes:** Recipient email is never stored in plain text in
+    storage paths.
+2.  **Verified Signing:** Enterprise shares use the OAuth identity, making the
+    `from` field unfakeable.
+3.  **Environment Stripping:** Automatically removes `<session_context>` and
+    local system rules before sharing.

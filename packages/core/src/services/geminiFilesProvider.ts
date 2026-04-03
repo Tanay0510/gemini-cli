@@ -167,4 +167,8 @@ export class GeminiFilesProvider implements ContextStorageProvider {
   async delete(fileName: string): Promise<void> {
     await this.genai.files.delete({ name: fileName });
   }
+
+  async downloadOrgDirectory(): Promise<string[]> {
+    return [];
+  }
 }

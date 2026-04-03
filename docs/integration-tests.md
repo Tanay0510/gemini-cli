@@ -209,3 +209,38 @@ Gemini CLI is tested across each:
 - `sandbox:none`: Runs the tests without any sandboxing.
 - `sandbox:docker`: Runs the tests in a Docker container.
 - `sandbox:podman`: Runs the tests in a Podman container.
+
+## Testing Best Practices
+
+We follow a multi-tiered testing strategy to ensure reliability across CLI,
+Core, and Cloud integrations.
+
+### Unit Testing (Vitest)
+
+Unit tests in `packages/core` and `packages/cli` should be used for:
+
+- **Complex Logic**: Command argument parsing, policy enforcement, and metadata
+  extraction.
+- **State Management**: Ensuring settings are correctly updated and persisted.
+- **Provider Mocking**: Using `vi.mock` to simulate cloud API responses (e.g.,
+  GCS JSON API, Gemini Files API) without making network calls.
+
+### Integration Testing (E2E)
+
+Integration tests should be used for:
+
+- **End-to-End Workflows**: Multi-step processes like sharing a context and
+  loading it in a different session.
+- **Filesystem Interaction**: Verifying that tools (like `list_directory`)
+  interact correctly with the OS across different sandboxes.
+- **Model Interaction**: Using `.responses` files to verify how the CLI handles
+  LLM tool calls and streaming output.
+
+### Feature Coverage
+
+New features (like **Team Sharing**) must include:
+
+1.  **Unit tests** for the command logic and backend providers.
+2.  **Mocked E2E tests** (if applicable) to verify the UI lifecycle.
+3.  **Cross-Sandbox validation** to ensure the feature works in `docker` and
+    `podman` environments.

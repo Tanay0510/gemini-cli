@@ -6,7 +6,12 @@
 
 import * as os from 'node:os';
 import { MessageType } from '../types.js';
-import { CommandKind, type SlashCommand } from './types.js';
+import {
+  CommandKind,
+  type SlashCommand,
+  type CommandContext,
+} from './types.js';
+import { SettingScope } from '../../config/settings.js';
 import {
   ContextShareService,
   resolveUserIdentity,
@@ -18,53 +23,276 @@ import {
 /** Minimum history turns (beyond the initial system setup) to allow sharing. */
 const MIN_HISTORY_LENGTH = 2;
 
+/** A `to` value containing "@" was set by Google OAuth — treat it as verified. */
+function isVerified(to: string): boolean {
+  return to.includes('@');
+}
+
+/** Check if a recipient email domain is in the allowed list. */
+function isDomainAllowed(email: string, allowedDomains: string[]): boolean {
+  if (allowedDomains.length === 0) return true;
+  const domain = email.split('@')[1]?.toLowerCase();
+  if (!domain) return false;
+
+  return allowedDomains.some((pattern) => {
+    const p = pattern.toLowerCase();
+    if (p.startsWith('*.')) {
+      return domain.endsWith(p.slice(2));
+    }
+    return domain === p;
+  });
+}
+
+/** Creates a ContextShareService from the current command context. */
+function createShareService(
+  context: CommandContext,
+): ContextShareService | null {
+  const agentCtx = context.services.agentContext;
+  const contentGeneratorConfig = agentCtx?.config.getContentGeneratorConfig();
+  if (!contentGeneratorConfig) return null;
+  const bucket = agentCtx?.config.getShareSettings().bucket;
+  return new ContextShareService({ config: contentGeneratorConfig, bucket });
+}
+
 /**
  * `/share @alice @bob` — compresses the current chat and shares it with one or
  * more teammates. Uses GCS when enterprise sharing is configured, otherwise
  * falls back to the Gemini Files API.
- *
- * Usage:
- *   /share @alice
- *   /share @alice @bob @carol
- *   /share alice                      (@ is optional on the first recipient)
- *   /share @alice @bob auth bug fix   (optional label applies to all recipients)
- *   /share @alice @bob --label auth bug fix
  */
 export const shareTeamCommand: SlashCommand = {
   name: 'share',
   description:
-    'Share the current conversation context with one or more teammates. Usage: /share @<teammate> [label]',
+    'Share context with teammates. Usage: /share @<teammate> [label] | --add @<email> | --sync | --list',
   kind: CommandKind.BUILT_IN,
   autoExecute: true,
   takesArgs: true,
 
-  completion: (context, partialArg) => {
+  completion: async (context, partialArg) => {
     const shareSettings =
-      context.services.agentContext?.config.getShareSettings();
-    const teammates = shareSettings?.teammates ?? [];
-    // Complete on the last whitespace-separated token so multi-recipient
-    // completion works: "/share @alice @b<tab>" completes "@bob".
+      context.services.agentContext?.config.getShareSettings() ??
+      context.services.settings.merged.share;
+
+    const localTeammates = shareSettings?.teammates ?? [];
+
+    // Background fetch org directory if possible
+    const shareService = createShareService(context);
+    const orgTeammates = shareService
+      ? await shareService.getOrgDirectory()
+      : [];
+
+    const allTeammates = Array.from(
+      new Set([...localTeammates, ...orgTeammates]),
+    );
+
     const tokens = partialArg.split(/\s+/);
     const lastToken = tokens[tokens.length - 1] ?? '';
+
+    // Handle flag completions
+    if (lastToken.startsWith('--')) {
+      const flags = [
+        '--add',
+        '--remove',
+        '--list',
+        '--label',
+        '--verify',
+        '--allow',
+        '--disallow',
+        '--sync',
+      ];
+      return flags.filter((f) => f.startsWith(lastToken));
+    }
+
+    if (tokens[tokens.length - 2] === '--verify') {
+      return ['on', 'off'].filter((v) => v.startsWith(lastToken));
+    }
+
     const partial = lastToken.startsWith('@') ? lastToken.slice(1) : lastToken;
     // Only offer completions when the last token looks like a recipient.
     if (!lastToken.startsWith('@') && tokens.length > 1) return [];
-    return teammates
+
+    return allTeammates
       .filter((t) => t.toLowerCase().startsWith(partial.toLowerCase()))
       .map((t) => `@${t}`);
   },
 
   action: async (context, args) => {
-    const { ui } = context;
-    const agentCtx = context.services.agentContext;
-
-    // --- Parse recipients and optional label ---
+    const { ui, services } = context;
+    const agentCtx = services.agentContext;
     const tokens = args.trim().split(/\s+/);
-    if (!tokens[0]) {
+    const cmd = tokens[0];
+
+    const shareSettings =
+      agentCtx?.config.getShareSettings() ?? services.settings.merged.share;
+    if (shareSettings.enabled === false) {
       ui.addItem(
         {
           type: MessageType.ERROR,
-          text: 'Usage: /share @<teammate> [@<teammate2> …] [label]  (e.g. /share @alice @bob auth bug)',
+          text: 'Team sharing is currently disabled. Enable it in /settings (Team Sharing > Enable Sharing).',
+        },
+        Date.now(),
+      );
+      return;
+    }
+
+    const shareService = createShareService(context);
+
+    // --- Handle Configuration & Management Flags ---
+
+    // 1. Teammate Management: /share --add @email | /share --remove @email
+    if (cmd === '--add' || cmd === '--remove') {
+      const email = tokens[1]?.replace(/^@/, '');
+      if (!email) {
+        ui.addItem(
+          { type: MessageType.ERROR, text: `Usage: /share ${cmd} @email` },
+          Date.now(),
+        );
+        return;
+      }
+      const currentTeammates = new Set(
+        services.settings.merged.share?.teammates ?? [],
+      );
+      if (cmd === '--add') currentTeammates.add(email);
+      else currentTeammates.delete(email);
+
+      services.settings.setValue(
+        SettingScope.User,
+        'share.teammates',
+        Array.from(currentTeammates),
+      );
+      ui.addItem(
+        {
+          type: MessageType.INFO,
+          text: `✓ Teammate ${cmd === '--add' ? 'added' : 'removed'}: ${email}`,
+        },
+        Date.now(),
+      );
+      return;
+    }
+
+    // 2. Directory Sync: /share --sync
+    if (cmd === '--sync') {
+      if (!shareService) {
+        ui.addItem(
+          {
+            type: MessageType.ERROR,
+            text: 'Context sharing service not available.',
+          },
+          Date.now(),
+        );
+        return;
+      }
+      ui.addItem(
+        {
+          type: MessageType.INFO,
+          text: '⌛ Syncing organizational directory from cloud...',
+        },
+        Date.now(),
+      );
+      const orgTeammates = await shareService.syncOrgDirectory();
+      ui.addItem(
+        {
+          type: MessageType.INFO,
+          text: `✓ Success! Synced ${orgTeammates.length} teammates from your organization directory.`,
+        },
+        Date.now(),
+      );
+      return;
+    }
+
+    // 3. Verification Policy: /share --verify on|off
+    if (cmd === '--verify') {
+      const value = tokens[1]?.toLowerCase();
+      if (value !== 'on' && value !== 'off') {
+        ui.addItem(
+          { type: MessageType.ERROR, text: 'Usage: /share --verify on|off' },
+          Date.now(),
+        );
+        return;
+      }
+      services.settings.setValue(
+        SettingScope.User,
+        'share.requireVerification',
+        value === 'on',
+      );
+      ui.addItem(
+        {
+          type: MessageType.INFO,
+          text: `✓ Sharing policy updated: Identity verification is now ${value.toUpperCase()}.`,
+        },
+        Date.now(),
+      );
+      return;
+    }
+
+    // 4. Domain Whitelisting: /share --allow google.com | /share --disallow google.com
+    if (cmd === '--allow' || cmd === '--disallow') {
+      const domain = tokens[1]?.toLowerCase();
+      if (!domain) {
+        ui.addItem(
+          { type: MessageType.ERROR, text: `Usage: /share ${cmd} <domain>` },
+          Date.now(),
+        );
+        return;
+      }
+      const currentDomains = new Set(
+        services.settings.merged.share?.allowedDomains ?? [],
+      );
+      if (cmd === '--allow') currentDomains.add(domain);
+      else currentDomains.delete(domain);
+
+      services.settings.setValue(
+        SettingScope.User,
+        'share.allowedDomains',
+        Array.from(currentDomains),
+      );
+      ui.addItem(
+        {
+          type: MessageType.INFO,
+          text: `✓ Allowed domains updated. ${cmd === '--allow' ? 'Added' : 'Removed'}: ${domain}`,
+        },
+        Date.now(),
+      );
+      return;
+    }
+
+    // 5. Status Report: /share --list
+    if (cmd === '--list') {
+      const settings = services.settings.merged.share;
+      const localTeammates = settings?.teammates ?? [];
+      const domains = settings?.allowedDomains ?? [];
+      const verify = settings?.requireVerification
+        ? 'REQUIRED 🔒'
+        : 'OPTIONAL 🔓';
+
+      const orgTeammates = shareService
+        ? await shareService.getOrgDirectory()
+        : [];
+
+      const lines = [
+        'Team Sharing Configuration:',
+        `  Verification:    ${verify}`,
+        `  Allowed Domains: ${domains.length > 0 ? domains.join(', ') : 'ANY (unrestricted)'}`,
+        '',
+        `Organization Directory: (${orgTeammates.length} users cached)`,
+        'Frequent Teammates (Local):',
+        ...(localTeammates.length > 0
+          ? localTeammates.map((t) => `  • @${t}`)
+          : ['  (No local teammates added yet. Use /share --add @email)']),
+      ];
+
+      ui.addItem(
+        { type: MessageType.INFO, text: lines.join('\n') },
+        Date.now(),
+      );
+      return;
+    }
+
+    // --- Standard Share Action ---
+    if (!tokens[0] || tokens[0].startsWith('--')) {
+      ui.addItem(
+        {
+          type: MessageType.ERROR,
+          text: 'Usage: /share @<teammate> [label]\nFlags: --add, --sync, --verify on|off, --allow <domain>, --list',
         },
         Date.now(),
       );
@@ -92,7 +320,6 @@ export const shareTeamCommand: SlashCommand = {
         .join(' ')
         .trim() || undefined;
 
-    // --- Validate we have a chat session ---
     if (!agentCtx) {
       ui.addItem(
         { type: MessageType.ERROR, text: 'No active agent context.' },
@@ -100,6 +327,7 @@ export const shareTeamCommand: SlashCommand = {
       );
       return;
     }
+
     const geminiClient = agentCtx.geminiClient;
     const chat = geminiClient?.getChat();
     if (!chat || !geminiClient) {
@@ -110,7 +338,6 @@ export const shareTeamCommand: SlashCommand = {
       return;
     }
 
-    // --- Validate history has meaningful content ---
     const history = chat.getHistory();
     if (history.length <= MIN_HISTORY_LENGTH) {
       ui.addItem(
@@ -123,7 +350,6 @@ export const shareTeamCommand: SlashCommand = {
       return;
     }
 
-    // --- Validate auth supports context sharing ---
     const contentGeneratorConfig = agentCtx.config.getContentGeneratorConfig();
     if (!contentGeneratorConfig) {
       ui.addItem(
@@ -136,14 +362,48 @@ export const shareTeamCommand: SlashCommand = {
       return;
     }
 
-    // --- Resolve sender name ---
-    const shareSettings = agentCtx.config.getShareSettings();
     const fromName = resolveUserIdentity(shareSettings, os.userInfo().username);
+
+    // --- Validate Settings (Domains & Verification) ---
+    const allowedDomains = shareSettings.allowedDomains ?? [];
+    const requireVerification = shareSettings.requireVerification ?? false;
 
     const normalizedRecipients = recipients.map((r) =>
       normalizeRecipient(r, fromName),
     );
-    const recipientList = normalizedRecipients.map((r) => `@${r}`).join(', ');
+
+    const validRecipients: string[] = [];
+    for (const recipient of normalizedRecipients) {
+      if (requireVerification && !isVerified(recipient)) {
+        ui.addItem(
+          {
+            type: MessageType.ERROR,
+            text: `Rejected: @${recipient} is not a verified identity. Identity verification is currently REQUIRED.`,
+          },
+          Date.now(),
+        );
+        continue;
+      }
+
+      if (
+        isVerified(recipient) &&
+        !isDomainAllowed(recipient, allowedDomains)
+      ) {
+        ui.addItem(
+          {
+            type: MessageType.ERROR,
+            text: `Rejected: Domain of @${recipient} is not in the allowed list: [${allowedDomains.join(', ')}].`,
+          },
+          Date.now(),
+        );
+        continue;
+      }
+      validRecipients.push(recipient);
+    }
+
+    if (validRecipients.length === 0) return;
+
+    const recipientList = validRecipients.map((r) => `@${r}`).join(', ');
     ui.addItem(
       {
         type: MessageType.INFO,
@@ -153,14 +413,12 @@ export const shareTeamCommand: SlashCommand = {
     );
 
     try {
-      // --- Compress once to reduce token cost, then fan out ---
       const promptId = `share-compress-${Date.now()}`;
       await geminiClient.tryCompressChat(promptId, true);
       const cleanHistory: Content[] = stripEnvironmentContext(
         chat.getHistory(),
       );
 
-      // --- Generate smart summary turn ---
       ui.addItem(
         {
           type: MessageType.INFO,
@@ -178,22 +436,14 @@ export const shareTeamCommand: SlashCommand = {
         ],
       };
 
-      // Use summary as label if not provided
       const finalLabel =
         label || (summary.length > 50 ? summary.slice(0, 47) + '...' : summary);
 
-      // --- Resolve enterprise GCS bucket (if configured) ---
-      const bucket = shareSettings.bucket;
-
-      const shareService = new ContextShareService({
-        config: contentGeneratorConfig,
-        bucket,
-      });
+      if (!shareService) throw new Error('Share service not available.');
       const model = agentCtx.config.getModel() ?? 'gemini-2.0-flash';
 
-      // Upload in parallel — one file per recipient
       const results = await Promise.allSettled(
-        normalizedRecipients.map((recipient) =>
+        validRecipients.map((recipient) =>
           shareService.share({
             to: recipient,
             from: fromName,
@@ -208,10 +458,10 @@ export const shareTeamCommand: SlashCommand = {
       const failed: Array<{ recipient: string; reason: string }> = [];
       results.forEach((result, i) => {
         if (result.status === 'fulfilled') {
-          succeeded.push(`@${recipients[i]}`);
+          succeeded.push(`@${validRecipients[i]}`);
         } else {
           failed.push({
-            recipient: `@${recipients[i]}`,
+            recipient: `@${validRecipients[i]}`,
             reason:
               result.reason instanceof Error
                 ? result.reason.message

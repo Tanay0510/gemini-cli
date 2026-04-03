@@ -447,6 +447,70 @@ export const AppContainer = (props: AppContainerProps) => {
       setConfigInitialized(true);
       startupProfiler.flush(config);
 
+      // --- Background Collaboration Sync (Hybrid Boot) ---
+      const SYNC_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+      const shareSettings = config.getShareSettings();
+      const now = Date.now();
+
+      if (
+        shareSettings.enabled !== false &&
+        now - (shareSettings.lastSyncedAt ?? 0) > SYNC_TTL_MS
+      ) {
+        // Fire-and-forget background sync
+        void (async () => {
+          try {
+            const contentGeneratorConfig = config.getContentGeneratorConfig();
+            if (!contentGeneratorConfig) return;
+
+            const { ContextShareService, UserAccountManager } = await import(
+              '@google/gemini-cli-core'
+            );
+            const shareService = new ContextShareService({
+              config: contentGeneratorConfig,
+              bucket: shareSettings.bucket,
+            });
+
+            let orgTeammates = shareSettings.orgDirectoryCache ?? [];
+
+            // 1. Sync Teammate Directory
+            if (shareSettings.autoSyncDirectory !== false) {
+              orgTeammates = await shareService.syncOrgDirectory();
+              settings.setValue(
+                SettingScope.User,
+                'share.orgDirectoryCache',
+                orgTeammates,
+              );
+            }
+
+            // 2. Check for New Inbox Items
+            if (shareSettings.autoSyncInbox !== false) {
+              const email = new UserAccountManager().getCachedGoogleAccount();
+              if (email) {
+                const inbox = await shareService.listInbox(email);
+
+                if (
+                  inbox.length > 0 &&
+                  shareSettings.showNotifications !== false
+                ) {
+                  historyManager.addItem(
+                    {
+                      type: MessageType.INFO,
+                      text: `You have ${inbox.length} shared context${inbox.length === 1 ? '' : 's'} in your /inbox.`,
+                    },
+                    Date.now(),
+                  );
+                }
+              }
+            }
+
+            // 3. Persist Last Sync Timestamp
+            settings.setValue(SettingScope.User, 'share.lastSyncedAt', now);
+          } catch (e) {
+            debugLogger.debug('Background collaboration sync failed:', e);
+          }
+        })();
+      }
+
       const sessionStartSource = resumedSessionData
         ? SessionStartSource.Resume
         : SessionStartSource.Startup;

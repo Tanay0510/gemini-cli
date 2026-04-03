@@ -12,92 +12,49 @@ import type {
   SharedContextEnvelope,
 } from './contextStorageProvider.js';
 
-// --------------------------------------------------------------------------
-// GCS path layout
-//
-// All shares live inside a single bucket configured via settings:
-//
-//   gs://<bucket>/inbox/<sha256(recipient)>/share--from--<sender>--<ts>.json
-//
-// Object custom metadata carries: from, model, label, timestamp.
-// This avoids filename parsing and keeps queries simple.
-// --------------------------------------------------------------------------
+const GCS_BASE = 'https://www.googleapis.com/storage/v1';
+const GCS_UPLOAD_BASE = 'https://www.googleapis.com/upload/storage/v1';
 
-const GCS_API_BASE = 'https://storage.googleapis.com/storage/v1';
-const GCS_UPLOAD_BASE = 'https://storage.googleapis.com/upload/storage/v1';
-const SCOPE = 'https://www.googleapis.com/auth/devstorage.read_write';
-
-function sha256(input: string): string {
-  return createHash('sha256').update(input).digest('hex');
-}
-
-function inboxPrefix(recipientEmail: string): string {
-  return `inbox/${sha256(recipientEmail)}/`;
-}
-
-function objectName(
-  recipientEmail: string,
-  from: string,
-  model: string,
-  timestamp: number,
-): string {
-  const safeFrom = from.replace(/[^a-zA-Z0-9@._-]/g, '_');
-  const safeModel = model
-    .replace(/models\//, '')
-    .replace(/[^a-zA-Z0-9._-]/g, '_');
-  return `${inboxPrefix(recipientEmail)}share--from--${safeFrom}--model--${safeModel}--${timestamp}.json`;
-}
-
-interface GcsObjectMetadata {
+interface GcsObject {
   name: string;
   metadata?: Record<string, string>;
 }
 
 interface GcsListResponse {
-  items?: GcsObjectMetadata[];
+  items?: GcsObject[];
   nextPageToken?: string;
 }
 
+interface GcsOrgDirectoryResponse {
+  teammates?: string[];
+}
+
 /**
- * ContextStorageProvider backed by Google Cloud Storage.
- *
- * Suitable for Vertex AI / OAuth / ADC users. Uses a shared GCS bucket
- * with prefix-based "virtual inboxes" keyed by SHA-256 of the recipient
- * email.  Metadata (from, model, label, ts) is stored in GCS object
- * custom metadata, making listing and filtering efficient without parsing
- * filenames.
- *
- * Authentication uses Application Default Credentials via `google-auth-library`.
- * The bucket must already exist and the user must have `storage.objects.*`
- * permissions on their inbox prefix.
+ * Enterprise sharing provider that stores context objects in a GCS bucket.
+ * Bucket name is typically discovered from the user's email domain or
+ * explicitly configured in settings.
  */
 export class GcsProvider implements ContextStorageProvider {
-  private readonly bucketName: string;
-  private readonly auth: GoogleAuth;
+  private auth: GoogleAuth | undefined;
 
-  constructor(bucketUri: string) {
-    // Accept "gs://bucket-name" or just "bucket-name"
-    const cleaned = bucketUri.replace(/^gs:\/\//, '').replace(/\/$/, '');
-    if (!cleaned) {
-      throw new Error(
-        'A GCS bucket URI is required for enterprise context sharing. ' +
-          'Set share.bucket in settings.',
-      );
+  constructor(private readonly bucketName: string) {
+    if (!bucketName) {
+      throw new Error('GcsProvider requires a bucket name.');
     }
-    this.bucketName = cleaned;
-    this.auth = new GoogleAuth({ scopes: [SCOPE] });
   }
 
   private async getAccessToken(): Promise<string> {
-    const client = await this.auth.getClient();
-    const tokenResponse = await client.getAccessToken();
-    if (!tokenResponse.token) {
-      throw new Error(
-        'Could not obtain an access token. Ensure you are authenticated via ' +
-          '`gcloud auth application-default login` or have valid ADC configured.',
-      );
+    if (!this.auth) {
+      this.auth = new GoogleAuth({
+        scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+      });
     }
-    return tokenResponse.token;
+    const client = await this.auth.getClient();
+    const token = await client.getAccessToken();
+    if (!token.token) {
+      throw new Error('Failed to retrieve Google Cloud access token.');
+    }
+    return token.token;
   }
 
   async upload(params: {
@@ -162,20 +119,16 @@ export class GcsProvider implements ContextStorageProvider {
 
   async list(recipientEmail: string): Promise<SharedContextEnvelope[]> {
     const token = await this.getAccessToken();
-    const prefix = inboxPrefix(recipientEmail);
     const results: SharedContextEnvelope[] = [];
+    const prefix = `${createHash('sha256').update(recipientEmail).digest('hex')}/`;
 
     let pageToken: string | undefined;
     do {
-      const params = new URLSearchParams({
-        prefix,
-        maxResults: '100',
-      });
-      if (pageToken) {
-        params.set('pageToken', pageToken);
-      }
+      const url =
+        `${GCS_BASE}/b/${encodeURIComponent(this.bucketName)}/o` +
+        `?prefix=${encodeURIComponent(prefix)}&projection=full` +
+        (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '');
 
-      const url = `${GCS_API_BASE}/b/${encodeURIComponent(this.bucketName)}/o?${params.toString()}`;
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -183,7 +136,7 @@ export class GcsProvider implements ContextStorageProvider {
       if (!response.ok) {
         const errorBody = await response.text().catch(() => '');
         throw new Error(
-          `Failed to list inbox from GCS (HTTP ${response.status}): ${errorBody}`,
+          `Failed to list GCS bucket (HTTP ${response.status}): ${errorBody}`,
         );
       }
 
@@ -203,13 +156,12 @@ export class GcsProvider implements ContextStorageProvider {
             obj.name.match(/share--from--(.+)--model--(.+)--(\d+)\.json$/) ||
             obj.name.match(/share--from--(.+)--(\d+)\.json$/);
           if (match) {
-            const isLegacy = match.length === 3;
             results.push({
               fileName: obj.name,
-              from: match[1].replace(/_/g, ' '),
+              from: match[1] || 'unknown',
               to: recipientEmail,
-              model: isLegacy ? 'unknown' : match[2],
-              timestamp: parseInt(match[isLegacy ? 2 : 3], 10),
+              model: match[2] && isNaN(Number(match[2])) ? match[2] : 'unknown',
+              timestamp: parseInt(match[3] || match[2] || '0', 10),
             });
           }
           continue;
@@ -234,7 +186,7 @@ export class GcsProvider implements ContextStorageProvider {
   async download(fileName: string): Promise<Content[]> {
     const token = await this.getAccessToken();
     const url =
-      `${GCS_API_BASE}/b/${encodeURIComponent(this.bucketName)}/o/` +
+      `${GCS_BASE}/b/${encodeURIComponent(this.bucketName)}/o/` +
       `${encodeURIComponent(fileName)}?alt=media`;
 
     const response = await fetch(url, {
@@ -248,13 +200,12 @@ export class GcsProvider implements ContextStorageProvider {
       );
     }
 
-    const json = await response.text();
     try {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
-      return JSON.parse(json) as Content[];
+      return (await response.json()) as Content[];
     } catch {
       throw new Error(
-        'Failed to parse shared context from GCS. The content may be corrupted.',
+        'Failed to parse shared context. The content may be corrupted or too large to extract.',
       );
     }
   }
@@ -262,7 +213,7 @@ export class GcsProvider implements ContextStorageProvider {
   async delete(fileName: string): Promise<void> {
     const token = await this.getAccessToken();
     const url =
-      `${GCS_API_BASE}/b/${encodeURIComponent(this.bucketName)}/o/` +
+      `${GCS_BASE}/b/${encodeURIComponent(this.bucketName)}/o/` +
       `${encodeURIComponent(fileName)}`;
 
     const response = await fetch(url, {
@@ -277,4 +228,40 @@ export class GcsProvider implements ContextStorageProvider {
       );
     }
   }
+
+  async downloadOrgDirectory(): Promise<string[]> {
+    const token = await this.getAccessToken();
+    const url =
+      `${GCS_BASE}/b/${encodeURIComponent(this.bucketName)}/o/` +
+      `${encodeURIComponent('metadata/org-directory.json')}?alt=media`;
+
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) return [];
+      return []; // Silent fail for background fetch
+    }
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      const data = (await response.json()) as GcsOrgDirectoryResponse;
+      return data.teammates ?? [];
+    } catch {
+      return [];
+    }
+  }
+}
+
+function objectName(
+  to: string,
+  from: string,
+  model: string,
+  timestamp: number,
+): string {
+  const hash = createHash('sha256').update(to).digest('hex');
+  const safeFrom = from.replace(/[^a-zA-Z0-9]/g, '_');
+  const safeModel = model.replace(/[^a-zA-Z0-9]/g, '_');
+  return `${hash}/share--from--${safeFrom}--model--${safeModel}--${timestamp}.json`;
 }

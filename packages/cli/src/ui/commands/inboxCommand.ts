@@ -350,6 +350,20 @@ export const inboxCommand: SlashCommand = {
 
   // Running `/inbox` with no sub-command defaults to listing.
   action: async (context, args) => {
+    const shareSettings =
+      context.services.agentContext?.config.getShareSettings() ??
+      context.services.settings.merged.share;
+    if (shareSettings.enabled === false) {
+      context.ui.addItem(
+        {
+          type: MessageType.ERROR,
+          text: 'Team sharing is currently disabled. Enable it in /settings (Team Sharing > Enable Sharing).',
+        },
+        Date.now(),
+      );
+      return;
+    }
+
     if (!args.trim()) {
       return listSubCommand.action?.(context, '');
     }

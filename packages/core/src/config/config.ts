@@ -191,9 +191,17 @@ export interface PlanSettings {
 }
 
 export interface ShareSettings {
+  enabled?: boolean;
+  autoSyncDirectory?: boolean;
+  autoSyncInbox?: boolean;
+  showNotifications?: boolean;
   myName?: string;
   teammates?: string[];
   bucket?: string;
+  requireVerification?: boolean;
+  allowedDomains?: string[];
+  orgDirectoryCache?: string[];
+  lastSyncedAt?: number;
 }
 
 export interface TelemetrySettings {

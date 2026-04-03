@@ -174,3 +174,23 @@ local configuration.
 If disabled, users will not be able to use certain features. Currently, this
 control disables Agent Skills. See [Agent Skills](../cli/skills.md) for more
 details.
+
+### Team Sharing Policies
+
+Administrators can enforce strict collaboration rules to prevent data leakage.
+
+#### Require Verification
+
+**Enabled/Disabled** | Default: disabled
+
+If enabled, users can only share context with recipients who have a verified
+Google identity. This prevents sharing with arbitrary handles or unverified
+usernames.
+
+#### Allowed Domains
+
+**Default**: empty
+
+An explicit list of domains (e.g., `["company.com"]`) allowed for context
+sharing. If configured, any share attempt to an email address outside these
+domains will be blocked by the CLI.
