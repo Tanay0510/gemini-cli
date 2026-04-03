@@ -6,6 +6,7 @@
 
 import * as os from 'node:os';
 import { MessageType } from '../types.js';
+import { SettingScope } from '../../config/settings.js';
 import {
   CommandKind,
   type SlashCommand,
@@ -17,6 +18,7 @@ import {
   normalizeRecipient,
   stripEnvironmentContext,
   type Content,
+  debugLogger,
 } from '@google/gemini-cli-core';
 
 /** Minimum history turns (beyond the initial system setup) to allow sharing. */
@@ -72,38 +74,42 @@ export const shareTeamCommand: SlashCommand = {
   takesArgs: true,
 
   completion: async (context, partialArg) => {
-    const shareSettings =
-      context.services.agentContext?.config.getShareSettings() ??
-      context.services.settings.merged.share;
+    try {
+      const shareSettings =
+        context.services.agentContext?.config.getShareSettings() ??
+        context.services.settings.merged.share;
 
-    const localTeammates = shareSettings?.teammates ?? [];
+      const localTeammates = shareSettings?.teammates ?? [];
+      const cachedOrgTeammates = shareSettings?.orgDirectoryCache ?? [];
 
-    // Background fetch org directory if possible
-    const shareService = createShareService(context);
-    const orgTeammates = shareService
-      ? await shareService.getOrgDirectory()
-      : [];
+      const allTeammates = Array.from(
+        new Set([...localTeammates, ...cachedOrgTeammates]),
+      );
 
-    const allTeammates = Array.from(
-      new Set([...localTeammates, ...orgTeammates]),
-    );
+      const tokens = partialArg.split(/\s+/);
+      const lastToken = tokens[tokens.length - 1] ?? '';
 
-    const tokens = partialArg.split(/\s+/);
-    const lastToken = tokens[tokens.length - 1] ?? '';
+      // Handle flag completions
+      if (lastToken.startsWith('--')) {
+        const flags = ['--sync', '--list'];
+        return flags.filter((f) => f.startsWith(lastToken));
+      }
 
-    // Handle flag completions
-    if (lastToken.startsWith('--')) {
-      const flags = ['--sync', '--list'];
-      return flags.filter((f) => f.startsWith(lastToken));
+      // If they haven't typed @ yet, don't offer teammate suggestions
+      if (!lastToken.startsWith('@')) {
+        return [];
+      }
+
+      const partial = lastToken.slice(1).toLowerCase();
+
+      // Filter and return only the teammate suggestions
+      return allTeammates
+        .filter((t) => t.toLowerCase().startsWith(partial))
+        .map((t) => `@${t}`);
+    } catch (err) {
+      debugLogger.warn('Share completion error:', err);
+      return [];
     }
-
-    const partial = lastToken.startsWith('@') ? lastToken.slice(1) : lastToken;
-    // Only offer completions when the last token looks like a recipient.
-    if (!lastToken.startsWith('@') && tokens.length > 1) return [];
-
-    return allTeammates
-      .filter((t) => t.toLowerCase().startsWith(partial.toLowerCase()))
-      .map((t) => `@${t}`);
   },
 
   action: async (context, args) => {
@@ -158,16 +164,25 @@ export const shareTeamCommand: SlashCommand = {
       }
       ui.addItem(
         {
-          type: MessageType.INFO,
-          text: '⌛ Syncing organizational directory from cloud...',
+          type: MessageType.GEMINI,
+          text: 'Syncing organizational directory from cloud...',
         },
         Date.now(),
       );
       const orgTeammates = await shareService.syncOrgDirectory();
+      const now = Date.now();
+
+      services.settings.setValue(
+        SettingScope.User,
+        'share.orgDirectoryCache',
+        orgTeammates,
+      );
+      services.settings.setValue(SettingScope.User, 'share.lastSyncedAt', now);
+
       ui.addItem(
         {
-          type: MessageType.INFO,
-          text: `✓ Success! Synced ${orgTeammates.length} teammates from your organization directory.`,
+          type: MessageType.GEMINI,
+          text: `Synced ${orgTeammates.length} teammates from your organization directory.`,
         },
         Date.now(),
       );
@@ -176,33 +191,23 @@ export const shareTeamCommand: SlashCommand = {
 
     // 2. Status Report: /share --list
     if (cmd === '--list') {
-      const settings = services.settings.merged.share;
-      const localTeammates = settings?.teammates ?? [];
-      const domains = settings?.allowedDomains ?? [];
-      const verify = settings?.requireVerification
-        ? 'REQUIRED 🔒'
-        : 'OPTIONAL 🔓';
-
+      const shareSettings = services.settings.merged.share;
+      const localTeammates = shareSettings?.teammates ?? [];
       const orgTeammates = shareService
         ? await shareService.getOrgDirectory()
         : [];
 
       const lines = [
-        'Team Sharing Configuration:',
-        `  Verification:    ${verify}`,
-        `  Allowed Domains: ${domains.length > 0 ? domains.join(', ') : 'ANY (unrestricted)'}`,
-        '',
-        `Organization Directory: (${orgTeammates.length} users cached)`,
-        'Frequent Teammates (Local):',
-        ...(localTeammates.length > 0
-          ? localTeammates.map((t) => `  • @${t}`)
-          : [
-              '  (No local teammates added yet. Manage teammates in /settings)',
-            ]),
+        'Teammate Directory:',
+        `  Organization: ${orgTeammates.length} users cached (run /share --sync to refresh)`,
+        '  Frequent:     ' +
+          (localTeammates.length > 0
+            ? localTeammates.map((t) => `@${t}`).join(', ')
+            : '(None added yet. Manage teammates in /settings)'),
       ];
 
       ui.addItem(
-        { type: MessageType.INFO, text: lines.join('\n') },
+        { type: MessageType.GEMINI, text: lines.join('\n') },
         Date.now(),
       );
       return;

@@ -164,9 +164,6 @@ export class KnowledgeService {
   ): Promise<KnowledgeSnippet[]> {
     if (snippets.length === 0) return [];
 
-    // If only one, just return it (or we could still validate relevance)
-    if (snippets.length === 1) return snippets;
-
     const prompt = `Given the user query: "${query}"
 Which of the following solution summaries are relevant? 
 Return a comma-separated list of IDs, or "none" if none are relevant.
@@ -195,7 +192,7 @@ Relevant IDs:`;
       return snippets.filter((s) => relevantIds.includes(s.id));
     } catch (err) {
       debugLogger.warn('Failed to rank snippets:', err);
-      return snippets.slice(0, 3); // Fallback to most recent
+      return [];
     }
   }
 }

@@ -224,6 +224,7 @@ function useCommandSuggestions(
       return () => abortController.abort();
     }
 
+    setIsLoading(false);
     const commandsToSearch = currentLevel || [];
     if (commandsToSearch.length > 0) {
       const performFuzzySearch = async () => {

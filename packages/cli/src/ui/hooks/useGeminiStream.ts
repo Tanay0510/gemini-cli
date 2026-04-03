@@ -46,6 +46,7 @@ import {
   UserAccountManager,
   GcsProvider,
   TASK_COMPLETE_TOOL_NAME,
+  getDefaultSharedBucket,
 } from '@google/gemini-cli-core';
 import type {
   Config,
@@ -260,7 +261,11 @@ export const useGeminiStream = (
   const isRespondingRef = useRef<boolean>(false);
   const shareBucketUri = config.getShareSettings().bucket;
   const adminShareBucket = settings.merged.admin?.share?.bucket;
-  const effectiveBucket = adminShareBucket ?? shareBucketUri;
+  const userEmail = new UserAccountManager().getCachedGoogleAccount();
+  const effectiveBucket =
+    adminShareBucket ||
+    shareBucketUri ||
+    (userEmail ? getDefaultSharedBucket(userEmail) : undefined);
 
   const setIsResponding = useCallback(
     (value: boolean) => {
@@ -1727,8 +1732,6 @@ export const useGeminiStream = (
                 });
               }
 
-              // --- Knowledge Indexing Trigger ---
-              // Check if the agent successfully completed a task.
               const wasTaskSuccessful = toolCalls.some(
                 (tc) =>
                   tc.request.name === TASK_COMPLETE_TOOL_NAME &&
@@ -1757,8 +1760,8 @@ export const useGeminiStream = (
 
                       if (snippet) {
                         addItem({
-                          type: MessageType.INFO,
-                          text: `💡 Solution indexed in team knowledge base: "${snippet.summary}"`,
+                          type: MessageType.GEMINI,
+                          text: `Solution indexed in team knowledge base: "${snippet.summary}"`,
                         });
                       }
                     } catch (err) {

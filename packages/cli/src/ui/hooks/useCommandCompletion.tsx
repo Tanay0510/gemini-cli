@@ -134,9 +134,17 @@ export function useCommandCompletion({
       };
     }
 
-    // FIRST: Check for @ completion (scan backwards from cursor)
-    // This must happen before slash command check so that `/cmd @file`
-    // triggers file completion, not just slash command completion.
+    // FIRST: Check for slash command (if on the first line)
+    if (cursorRow === 0 && isSlashCommand(currentLine.trim())) {
+      return {
+        completionMode: CompletionMode.SLASH,
+        query: currentLine,
+        completionStart: 0,
+        completionEnd: currentLine.length,
+      };
+    }
+
+    // THEN: Check for @ completion (scan backwards from cursor)
     for (let i = cursorCol - 1; i >= 0; i--) {
       const char = codePoints[i];
 
@@ -172,16 +180,6 @@ export function useCommandCompletion({
           completionEnd: end,
         };
       }
-    }
-
-    // THEN: Check for slash command (only if no @ completion is active)
-    if (cursorRow === 0 && isSlashCommand(currentLine.trim())) {
-      return {
-        completionMode: CompletionMode.SLASH,
-        query: currentLine,
-        completionStart: 0,
-        completionEnd: currentLine.length,
-      };
     }
 
     // Check for prompt completion - only if enabled

@@ -13,6 +13,8 @@ import {
   UserAccountManager,
   resolveUserIdentity,
   normalizeRecipient,
+  getDefaultSharedBucket,
+  debugLogger,
 } from '@google/gemini-cli-core';
 
 /**
@@ -26,6 +28,44 @@ export const askCommand: SlashCommand = {
   autoExecute: true,
   takesArgs: true,
 
+  completion: async (context, partialArg) => {
+    try {
+      const shareSettings =
+        context.services.agentContext?.config.getShareSettings() ??
+        context.services.settings.merged.share;
+
+      const localTeammates = shareSettings?.teammates ?? [];
+      const cachedOrgTeammates = shareSettings?.orgDirectoryCache ?? [];
+
+      const allTeammates = Array.from(
+        new Set([...localTeammates, ...cachedOrgTeammates]),
+      );
+
+      const tokens = partialArg.split(/\s+/);
+      const lastToken = tokens[tokens.length - 1] ?? '';
+
+      // Handle flag completions
+      if (lastToken.startsWith('--')) {
+        const flags = ['--list-requests', '--fulfill'];
+        return flags.filter((f) => f.startsWith(lastToken));
+      }
+
+      // If they haven't typed @ yet, don't offer teammate suggestions
+      if (!lastToken.startsWith('@')) {
+        return [];
+      }
+
+      const partial = lastToken.slice(1).toLowerCase();
+
+      return allTeammates
+        .filter((t) => t.toLowerCase().startsWith(partial))
+        .map((t) => `@${t}`);
+    } catch (err) {
+      debugLogger.warn('Ask completion error:', err);
+      return [];
+    }
+  },
+
   action: async (context, args) => {
     const { ui, services } = context;
     const tokens = args.trim().split(/\s+/);
@@ -35,22 +75,27 @@ export const askCommand: SlashCommand = {
     if (!agentCtx) return;
 
     const mergedSettings = services.settings.merged;
-    const bucket =
-      mergedSettings.admin?.share?.bucket ??
-      agentCtx.config.getShareSettings().bucket;
+    const myEmail = new UserAccountManager().getCachedGoogleAccount();
+
+    const adminBucket = mergedSettings.admin?.share?.bucket;
+    const userBucket = agentCtx.config.getShareSettings().bucket;
+    const discoveredBucket = myEmail
+      ? getDefaultSharedBucket(myEmail)
+      : undefined;
+
+    const bucket = adminBucket || userBucket || discoveredBucket;
 
     if (!bucket) {
       ui.addItem(
         {
           type: MessageType.ERROR,
-          text: 'Team sharing must be configured to use /ask.',
+          text: 'Team sharing bucket could not be resolved. Please configure it in /settings.',
         },
         Date.now(),
       );
       return;
     }
 
-    const myEmail = new UserAccountManager().getCachedGoogleAccount();
     if (!myEmail) {
       ui.addItem(
         {
@@ -73,26 +118,23 @@ export const askCommand: SlashCommand = {
         const requests = await knowledgeService.listPendingRequests(myEmail);
         if (requests.length === 0) {
           ui.addItem(
-            {
-              type: MessageType.INFO,
-              text: '📬 No pending teammate requests.',
-            },
+            { type: MessageType.GEMINI, text: 'No pending teammate requests.' },
             Date.now(),
           );
           return;
         }
 
         const lines = [
-          '📬 Pending Teammate Requests:',
+          'Pending Teammate Requests:',
           '',
           ...requests.map(
-            (r) => `  • From @${r.fromEmail}: "${r.query}" (ID: ${r.id})`,
+            (r, i) => `  ${i + 1}. From @${r.fromEmail}: "${r.query}"`,
           ),
           '',
-          'To fulfill a request, run /ask --fulfill <ID>',
+          'To fulfill a request, run /ask --fulfill <number>',
         ];
         ui.addItem(
-          { type: MessageType.INFO, text: lines.join('\n') },
+          { type: MessageType.GEMINI, text: lines.join('\n') },
           Date.now(),
         );
       } catch (err) {
@@ -108,45 +150,70 @@ export const askCommand: SlashCommand = {
     }
 
     if (firstToken === '--fulfill') {
-      const requestId = tokens[1];
-      if (!requestId) {
+      const selection = tokens[1];
+      if (!selection) {
         ui.addItem(
-          {
-            type: MessageType.ERROR,
-            text: 'Usage: /ask --fulfill <request-id>',
-          },
+          { type: MessageType.ERROR, text: 'Usage: /ask --fulfill <number>' },
           Date.now(),
         );
         return;
       }
 
-      ui.addItem(
-        {
-          type: MessageType.INFO,
-          text: `🔍 Searching local history to fulfill request ${requestId}...`,
-        },
-        Date.now(),
-      );
+      try {
+        const requests = await knowledgeService.listPendingRequests(myEmail);
+        const index = parseInt(selection, 10) - 1;
+        const targetRequest = requests[index];
 
-      // In a real implementation, we would:
-      // 1. Download the request object to get the query
-      // 2. Search local history for a match
-      // 3. Prompt user for consent
-      // 4. Publish solution and mark request as fulfilled
-      // For the POC, we'll just show the intent.
-      ui.addItem(
-        {
-          type: MessageType.INFO,
-          text: 'Fulfillment workflow initiated. (Matching local history...)',
-        },
-        Date.now(),
-      );
+        if (!targetRequest) {
+          ui.addItem(
+            {
+              type: MessageType.ERROR,
+              text: `Invalid request number: ${selection}. Run /ask --list-requests to see valid numbers.`,
+            },
+            Date.now(),
+          );
+          return;
+        }
+
+        ui.addItem(
+          {
+            type: MessageType.GEMINI,
+            text: `Searching local history to fulfill request from @${targetRequest.fromEmail}: "${targetRequest.query}"...`,
+          },
+          Date.now(),
+        );
+
+        // Matching logic would go here (using targetRequest.id)
+        ui.addItem(
+          {
+            type: MessageType.GEMINI,
+            text: 'Fulfillment workflow initiated. (Matching local history...)',
+          },
+          Date.now(),
+        );
+      } catch (err) {
+        ui.addItem(
+          {
+            type: MessageType.ERROR,
+            text: `Failed to initiate fulfillment: ${String(err)}`,
+          },
+          Date.now(),
+        );
+      }
       return;
     }
 
     // --- Standard Ask Action ---
-    const recipient = firstToken;
-    const query = tokens.slice(1).join(' ');
+    const recipient = tokens[0];
+    let query = tokens.slice(1).join(' ').trim();
+
+    // Strip surrounding quotes if they exist
+    if (
+      (query.startsWith('"') && query.endsWith('"')) ||
+      (query.startsWith("'") && query.endsWith("'"))
+    ) {
+      query = query.slice(1, -1).trim();
+    }
 
     if (!recipient?.startsWith('@') || !query) {
       ui.addItem(
@@ -167,8 +234,8 @@ export const askCommand: SlashCommand = {
 
     ui.addItem(
       {
-        type: MessageType.INFO,
-        text: `🔍 Querying @${targetEmail}'s agent for: "${query}"...`,
+        type: MessageType.GEMINI,
+        text: `Querying @${targetEmail}'s agent for: "${query}"...`,
       },
       Date.now(),
     );
@@ -179,14 +246,14 @@ export const askCommand: SlashCommand = {
 
       if (snippets.length > 0) {
         const lines = [
-          `💡 Found ${snippets.length} relevant solution(s) from @${targetEmail}:`,
+          `Found ${snippets.length} relevant solution(s) from @${targetEmail}:`,
           '',
-          ...snippets.map((s) => `  • ${s.summary}`),
+          ...snippets.map((s) => `  * ${s.summary}`),
           '',
           'Would you like me to try applying these findings to our current task?',
         ];
         ui.addItem(
-          { type: MessageType.INFO, text: lines.join('\n') },
+          { type: MessageType.GEMINI, text: lines.join('\n') },
           Date.now(),
         );
         return;
@@ -195,7 +262,7 @@ export const askCommand: SlashCommand = {
       // Step 2: No public solution, send a private request
       ui.addItem(
         {
-          type: MessageType.INFO,
+          type: MessageType.GEMINI,
           text: [
             `No public solution found in @${targetEmail}'s knowledge base.`,
             `Sending a private request to their agent...`,
@@ -212,8 +279,8 @@ export const askCommand: SlashCommand = {
 
       ui.addItem(
         {
-          type: MessageType.INFO,
-          text: `✓ Request sent! @${targetEmail}'s agent will notify them next time they use the CLI.`,
+          type: MessageType.GEMINI,
+          text: `Request sent! @${targetEmail}'s agent will notify them next time they use the CLI.`,
         },
         Date.now(),
       );

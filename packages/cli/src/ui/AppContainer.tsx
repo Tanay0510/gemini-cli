@@ -86,6 +86,7 @@ import {
   KnowledgeService,
   GcsProvider,
   UserAccountManager,
+  getDefaultSharedBucket,
 } from '@google/gemini-cli-core';
 import { validateAuthMethod } from '../config/auth.js';
 import process from 'node:process';
@@ -777,6 +778,9 @@ export const AppContainer = (props: AppContainerProps) => {
     }
   }, [authState, authContext, setAuthState]);
 
+  const lastRequestCountRef = useRef<number>(0);
+  const lastNotifiedTimeRef = useRef<number>(0);
+
   // Check for teammate knowledge requests periodically
   useEffect(() => {
     if (
@@ -790,7 +794,9 @@ export const AppContainer = (props: AppContainerProps) => {
       try {
         const email = new UserAccountManager().getCachedGoogleAccount();
         const bucket =
-          settings.merged.admin?.share?.bucket ?? settings.merged.share?.bucket;
+          settings.merged.admin?.share?.bucket ||
+          settings.merged.share?.bucket ||
+          (email ? getDefaultSharedBucket(email) : undefined);
 
         if (!email || !bucket) return;
 
@@ -800,15 +806,26 @@ export const AppContainer = (props: AppContainerProps) => {
         );
 
         const requests = await knowledgeService.listPendingRequests(email);
-        if (requests.length > 0) {
+        const now = Date.now();
+
+        // Only notify if:
+        // 1. The count has increased (new request)
+        // 2. OR it's been more than 1 hour since the last notification and count > 0
+        const hasNewRequests = requests.length > lastRequestCountRef.current;
+        const shouldRemind =
+          requests.length > 0 && now - lastNotifiedTimeRef.current > 3600000;
+
+        if (hasNewRequests || shouldRemind) {
           historyManager.addItem(
             {
-              type: MessageType.INFO,
-              text: `📬 You have ${requests.length} pending teammate knowledge request(s). Run /ask --list-requests to view.`,
+              type: MessageType.GEMINI,
+              text: `You have ${requests.length} pending teammate knowledge request(s). Run /ask --list-requests to view.`,
             },
-            Date.now(),
+            now,
           );
+          lastNotifiedTimeRef.current = now;
         }
+        lastRequestCountRef.current = requests.length;
       } catch (err) {
         debugLogger.warn('Failed to check pending requests:', err);
       }
@@ -818,13 +835,14 @@ export const AppContainer = (props: AppContainerProps) => {
     void checkRequests();
     const interval = setInterval(checkRequests, 5 * 60 * 1000);
     return () => clearInterval(interval);
+    // historyManager is intentionally omitted to avoid re-render loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     authState,
     settings.merged.share?.enabled,
     settings.merged.admin?.share?.bucket,
     settings.merged.share?.bucket,
     config,
-    historyManager,
   ]);
 
   const {
