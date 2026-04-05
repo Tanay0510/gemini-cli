@@ -5,6 +5,7 @@
  */
 
 import * as os from 'node:os';
+import * as path from 'node:path';
 import { MessageType } from '../types.js';
 import { CommandKind, type SlashCommand } from './types.js';
 import {
@@ -15,6 +16,7 @@ import {
   normalizeRecipient,
   getDefaultSharedBucket,
   debugLogger,
+  GitService,
 } from '@google/gemini-cli-core';
 
 /**
@@ -175,27 +177,98 @@ export const askCommand: SlashCommand = {
           return;
         }
 
-        ui.addItem(
-          {
-            type: MessageType.GEMINI,
-            text: `Searching local history to fulfill request from @${targetRequest.fromEmail}: "${targetRequest.query}"...`,
-          },
-          Date.now(),
+        ui.setPendingItem({
+          type: MessageType.GEMINI,
+          text: `Searching local history to fulfill request from @${targetRequest.fromEmail}: "${targetRequest.query}"...`,
+        });
+
+        // 1. Identify the project to search
+        const projectHash =
+          targetRequest.projectOriginHash ??
+          (await new GitService(
+            agentCtx.config.getProjectRoot(),
+            agentCtx.config.storage,
+          ).getOriginHash());
+
+        if (!projectHash) {
+          throw new Error(
+            'Could not determine project identity for fulfillment.',
+          );
+        }
+
+        const chatsDir = path.join(
+          agentCtx.config.storage.getProjectTempDir(),
+          'chats',
         );
 
-        // Matching logic would go here (using targetRequest.id)
+        // 2. Find the best matching local session
+        const match = await knowledgeService.findBestSession(
+          chatsDir,
+          targetRequest.query,
+        );
+
+        if (!match) {
+          ui.setPendingItem(null);
+          ui.addItem(
+            {
+              type: MessageType.GEMINI,
+              text: `I searched your local history for "${targetRequest.query}" but couldn't find a strong match to share.`,
+            },
+            Date.now(),
+          );
+          return;
+        }
+
+        // 3. Extract the recipe from the matched session
+        const matchedHistory = await knowledgeService.loadSessionHistory(
+          path.join(chatsDir, match.fileName),
+        );
+
+        // We'll re-use the publishSolution logic to extract the recipe but not upload yet
+        const tempSnippet = await knowledgeService.publishSolution({
+          userEmail: myEmail,
+          history: matchedHistory,
+          model: agentCtx.config.getModel(),
+          projectOriginHash: projectHash,
+        });
+
+        if (!tempSnippet) {
+          throw new Error(
+            'Failed to generate a summary for the matched session.',
+          );
+        }
+
+        ui.setPendingItem(null);
+        const lines = [
+          `I found a matching solution in your session: "${match.summary}"`,
+          '',
+          'Proposed Recipe to share:',
+          `  * Summary: ${tempSnippet.summary}`,
+        ];
+
+        if (
+          tempSnippet.provenCommands &&
+          tempSnippet.provenCommands.length > 0
+        ) {
+          lines.push('  * Proven Commands:');
+          tempSnippet.provenCommands.forEach((c) => lines.push(`    $ ${c}`));
+        }
+
+        lines.push(
+          '',
+          `Should I share this recipe with @${targetRequest.fromEmail}? (y/n)`,
+        );
+
         ui.addItem(
-          {
-            type: MessageType.GEMINI,
-            text: 'Fulfillment workflow initiated. (Matching local history...)',
-          },
+          { type: MessageType.GEMINI, text: lines.join('\n') },
           Date.now(),
         );
       } catch (err) {
+        ui.setPendingItem(null);
         ui.addItem(
           {
             type: MessageType.ERROR,
-            text: `Failed to initiate fulfillment: ${String(err)}`,
+            text: `Failed to fulfill request: ${String(err)}`,
           },
           Date.now(),
         );
@@ -232,13 +305,10 @@ export const askCommand: SlashCommand = {
     );
     const targetEmail = normalizeRecipient(recipient, fromName);
 
-    ui.addItem(
-      {
-        type: MessageType.GEMINI,
-        text: `Querying @${targetEmail}'s agent for: "${query}"...`,
-      },
-      Date.now(),
-    );
+    ui.setPendingItem({
+      type: MessageType.GEMINI,
+      text: `Searching @${targetEmail}'s knowledge base for: "${query}"...`,
+    });
 
     try {
       // Step 1: Check published knowledge snippets
@@ -246,37 +316,119 @@ export const askCommand: SlashCommand = {
 
       if (snippets.length > 0) {
         const lines = [
-          `Found ${snippets.length} relevant solution(s) from @${targetEmail}:`,
+          `Found ${snippets.length} relevant solution(s) from @${targetEmail}'s knowledge base:`,
           '',
-          ...snippets.map((s) => `  * ${s.summary}`),
-          '',
-          'Would you like me to try applying these findings to our current task?',
         ];
+
+        for (const s of snippets) {
+          lines.push(`  * ${s.summary}`);
+
+          // --- Translation Layer: Environment Check ---
+          if (s.environment) {
+            const myOs = os.platform();
+            const myNode = process.version;
+            const warnings: string[] = [];
+
+            if (s.environment.os !== myOs) {
+              warnings.push(
+                `OS mismatch (Alice: ${s.environment.os}, You: ${myOs})`,
+              );
+            }
+            if (
+              s.environment.nodeVersion &&
+              s.environment.nodeVersion !== myNode
+            ) {
+              warnings.push(
+                `Node mismatch (Alice: ${s.environment.nodeVersion}, You: ${myNode})`,
+              );
+            }
+
+            if (warnings.length > 0) {
+              lines.push('    [Environment Note]:');
+              warnings.forEach((w) => lines.push(`      ! ${w}`));
+              lines.push(
+                '      I will adapt the instructions for your machine.',
+              );
+            }
+          }
+
+          if (s.logicTrace && s.logicTrace.length > 0) {
+            lines.push('    Reasoning:');
+            s.logicTrace.forEach((t) => lines.push(`      - ${t}`));
+          }
+          if (s.provenCommands && s.provenCommands.length > 0) {
+            lines.push('    Proven Commands:');
+            s.provenCommands.forEach((c) => lines.push(`      $ ${c}`));
+          }
+          if (s.codeChanges && s.codeChanges.length > 0) {
+            lines.push('    Files Modified:');
+            s.codeChanges.forEach((c) => lines.push(`      + ${c.path}`));
+          }
+          lines.push('');
+        }
+
+        lines.push(
+          'Would you like me to try applying these findings to our current task? (y/n)',
+        );
+
+        ui.setPendingItem(null);
         ui.addItem(
           { type: MessageType.GEMINI, text: lines.join('\n') },
           Date.now(),
         );
+
+        // Inject the findings into the model's history with environment context
+        const geminiClient = agentCtx.config.getGeminiClient();
+        if (geminiClient) {
+          const findingsContext = [
+            `I found the following relevant solution(s) in @${targetEmail}'s knowledge base:`,
+            ...snippets.map((s) => {
+              let snippetText = `- ${s.summary}`;
+              if (s.environment) {
+                snippetText += ` (Proven on: ${s.environment.os}, Node ${s.environment.nodeVersion})`;
+              }
+              return snippetText;
+            }),
+            '',
+            'IMPORTANT: If there are environment mismatches, please translate the commands and logic to be compatible with my current system.',
+            'The user has been notified and might ask to apply them.',
+          ].join('\n');
+
+          await geminiClient.addHistory({
+            role: 'user',
+            parts: [{ text: findingsContext }],
+          });
+          await geminiClient.addHistory({
+            role: 'model',
+            parts: [{ text: lines.join('\n') }],
+          });
+        }
         return;
       }
 
       // Step 2: No public solution, send a private request
-      ui.addItem(
-        {
-          type: MessageType.GEMINI,
-          text: [
-            `No public solution found in @${targetEmail}'s knowledge base.`,
-            `Sending a private request to their agent...`,
-          ].join('\n'),
-        },
-        Date.now(),
+      ui.setPendingItem({
+        type: MessageType.GEMINI,
+        text: [
+          `No public solution found in @${targetEmail}'s knowledge base.`,
+          `Sending a private request to their agent...`,
+        ].join('\n'),
+      });
+
+      const gitService = new GitService(
+        agentCtx.config.getProjectRoot(),
+        agentCtx.config.storage,
       );
+      const projectOriginHash = (await gitService.getOriginHash()) ?? undefined;
 
       await knowledgeService.sendRequest({
         fromEmail: myEmail,
         toEmail: targetEmail,
         query,
+        projectOriginHash,
       });
 
+      ui.setPendingItem(null);
       ui.addItem(
         {
           type: MessageType.GEMINI,
@@ -285,6 +437,7 @@ export const askCommand: SlashCommand = {
         Date.now(),
       );
     } catch (err) {
+      ui.setPendingItem(null);
       const message = err instanceof Error ? err.message : String(err);
       ui.addItem(
         {

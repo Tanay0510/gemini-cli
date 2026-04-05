@@ -6,6 +6,7 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import { isNodeError } from '../utils/errors.js';
 import { spawnAsync } from '../utils/shell-utils.js';
 import { simpleGit, CheckRepoActions, type SimpleGit } from 'simple-git';
@@ -153,5 +154,28 @@ export class GitService {
     await repo.raw(['restore', '--source', commitHash, '.']);
     // Removes any untracked files that were introduced post snapshot.
     await repo.clean('f', ['-d']);
+  }
+
+  /**
+   * Retrieves the remote origin URL of the repository.
+   */
+  async getRemoteOrigin(): Promise<string | null> {
+    try {
+      const remotes = await this.shadowGitRepository.getRemotes(true);
+      const origin = remotes.find((r) => r.name === 'origin');
+      return origin?.refs.fetch || null;
+    } catch (err) {
+      debugLogger.debug('Failed to get remote origin:', err);
+      return null;
+    }
+  }
+
+  /**
+   * Generates a stable hash of the remote origin URL.
+   */
+  async getOriginHash(): Promise<string | null> {
+    const origin = await this.getRemoteOrigin();
+    if (!origin) return null;
+    return createHash('sha256').update(origin).digest('hex');
   }
 }

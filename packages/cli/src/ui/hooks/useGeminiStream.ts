@@ -1732,11 +1732,32 @@ export const useGeminiStream = (
                 });
               }
 
-              const wasTaskSuccessful = toolCalls.some(
+              // --- Knowledge Indexing Trigger ---
+              // Check if the agent successfully completed a task.
+              // Success is defined as:
+              // 1. Explicit tool call to complete_task
+              // 2. OR the final message contains keywords suggesting completion and history is long enough.
+              const hasCompleteToolCall = toolCalls.some(
                 (tc) =>
                   tc.request.name === TASK_COMPLETE_TOOL_NAME &&
                   tc.status === 'success',
               );
+
+              const lastMessage = history[history.length - 1];
+              const lastMessageText = lastMessage?.text?.toLowerCase() ?? '';
+
+              const hasSuccessKeywords =
+                lastMessageText.includes('successfully') ||
+                lastMessageText.includes('completed') ||
+                lastMessageText.includes('finished') ||
+                lastMessageText.includes('done') ||
+                lastMessageText.includes('created');
+
+              const isSubstantialHistory = history.length >= 4;
+
+              const wasTaskSuccessful =
+                hasCompleteToolCall ||
+                (hasSuccessKeywords && isSubstantialHistory);
 
               if (wasTaskSuccessful && settings.merged.share?.enabled) {
                 const email = new UserAccountManager().getCachedGoogleAccount();
@@ -1749,6 +1770,14 @@ export const useGeminiStream = (
                         new GcsProvider(effectiveBucket),
                         config.getBaseLlmClient(),
                       );
+
+                      const gitService = new GitService(
+                        config.getProjectRoot(),
+                        config.storage,
+                      );
+                      const projectOriginHash =
+                        (await gitService.getOriginHash()) ?? undefined;
+
                       const snippet = await knowledgeService.publishSolution({
                         userEmail: email,
                         // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
@@ -1756,6 +1785,8 @@ export const useGeminiStream = (
                           .getGeminiClient()
                           .getHistory() as Content[],
                         model: config.getModel(),
+                        projectOriginHash,
+                        projectRoot: config.getProjectRoot(),
                       });
 
                       if (snippet) {
@@ -1830,6 +1861,7 @@ export const useGeminiStream = (
       effectiveBucket,
       toolCalls,
       setIsResponding,
+      history,
     ],
   );
 

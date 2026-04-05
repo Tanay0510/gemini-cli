@@ -147,7 +147,6 @@ export const shareTeamCommand: SlashCommand = {
     }
 
     const shareService = createShareService(context);
-
     // --- Handle Management Flags ---
 
     // 1. Directory Sync: /share --sync
@@ -162,30 +161,38 @@ export const shareTeamCommand: SlashCommand = {
         );
         return;
       }
-      ui.addItem(
-        {
-          type: MessageType.GEMINI,
-          text: 'Syncing organizational directory from cloud...',
-        },
-        Date.now(),
-      );
-      const orgTeammates = await shareService.syncOrgDirectory();
-      const now = Date.now();
 
-      services.settings.setValue(
-        SettingScope.User,
-        'share.orgDirectoryCache',
-        orgTeammates,
-      );
-      services.settings.setValue(SettingScope.User, 'share.lastSyncedAt', now);
+      // Show "Thinking" state
+      ui.setPendingItem({
+        type: MessageType.GEMINI,
+        text: 'Syncing organizational directory from cloud...',
+      });
 
-      ui.addItem(
-        {
-          type: MessageType.GEMINI,
-          text: `Synced ${orgTeammates.length} teammates from your organization directory.`,
-        },
-        Date.now(),
-      );
+      try {
+        const orgTeammates = await shareService.syncOrgDirectory();
+        const now = Date.now();
+
+        services.settings.setValue(
+          SettingScope.User,
+          'share.orgDirectoryCache',
+          orgTeammates,
+        );
+        services.settings.setValue(
+          SettingScope.User,
+          'share.lastSyncedAt',
+          now,
+        );
+
+        ui.addItem(
+          {
+            type: MessageType.GEMINI,
+            text: `Success! Synced ${orgTeammates.length} teammates from your organization directory.`,
+          },
+          now,
+        );
+      } finally {
+        ui.setPendingItem(null);
+      }
       return;
     }
 
@@ -333,28 +340,28 @@ export const shareTeamCommand: SlashCommand = {
     if (validRecipients.length === 0) return;
 
     const recipientList = validRecipients.map((r) => `@${r}`).join(', ');
-    ui.addItem(
-      {
-        type: MessageType.INFO,
-        text: `Compressing and sharing context with ${recipientList}…`,
-      },
-      Date.now(),
-    );
+    ui.setPendingItem({
+      type: MessageType.GEMINI,
+      text: `Compressing and sharing context with ${recipientList}...`,
+    });
 
     try {
+      const geminiClient = agentCtx.geminiClient;
+      const chat = geminiClient?.getChat();
+      if (!chat || !geminiClient) {
+        throw new Error('No active chat session.');
+      }
+
       const promptId = `share-compress-${Date.now()}`;
       await geminiClient.tryCompressChat(promptId, true);
       const cleanHistory: Content[] = stripEnvironmentContext(
         chat.getHistory(),
       );
 
-      ui.addItem(
-        {
-          type: MessageType.INFO,
-          text: 'Summarizing conversation for recipient…',
-        },
-        Date.now(),
-      );
+      ui.setPendingItem({
+        type: MessageType.GEMINI,
+        text: 'Summarizing conversation for recipient...',
+      });
       const summary = await geminiClient.summarizeChat();
       const summaryTurn: Content = {
         role: 'user',
@@ -404,10 +411,10 @@ export const shareTeamCommand: SlashCommand = {
         const providerName = shareService.getProviderName();
         ui.addItem(
           {
-            type: MessageType.INFO,
+            type: MessageType.GEMINI,
             text: [
-              `✓ Context shared with ${succeeded.join(', ')}${labelNote} via ${providerName}.`,
-              `They can load it by running: /inbox`,
+              `Context shared with ${succeeded.join(', ')}${labelNote} via ${providerName}.`,
+              'They can load it by running: /inbox',
             ].join('\n'),
           },
           Date.now(),
@@ -431,6 +438,8 @@ export const shareTeamCommand: SlashCommand = {
         },
         Date.now(),
       );
+    } finally {
+      ui.setPendingItem(null);
     }
   },
 };
