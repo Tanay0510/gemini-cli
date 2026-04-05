@@ -248,7 +248,9 @@ Relevant IDs:`;
           ) {
             const args = part.functionCall.args;
             const command =
-              typeof args?.command === 'string' ? args.command : undefined;
+              typeof args?.['command'] === 'string'
+                ? args['command']
+                : undefined;
 
             // Look for the response in the next user turn
             const nextTurn = history[i + 1];
@@ -263,8 +265,8 @@ Relevant IDs:`;
               // Only include if it was successful (not code 1)
               if (
                 command &&
-                typeof response?.output === 'string' &&
-                !response.output.includes('Exit Code: 1')
+                typeof response?.['output'] === 'string' &&
+                !response['output'].includes('Exit Code: 1')
               ) {
                 commands.push(command);
               }
@@ -291,10 +293,13 @@ Relevant IDs:`;
             const args = part.functionCall.args;
             if (
               (name === 'write_file' || name === 'edit') &&
-              typeof args?.file_path === 'string' &&
-              typeof args?.content === 'string'
+              typeof args?.['file_path'] === 'string' &&
+              typeof args?.['content'] === 'string'
             ) {
-              changes.push({ path: args.file_path, content: args.content });
+              changes.push({
+                path: args['file_path'],
+                content: args['content'],
+              });
             }
           }
         }
