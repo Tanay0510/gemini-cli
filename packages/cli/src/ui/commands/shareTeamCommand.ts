@@ -340,6 +340,7 @@ export const shareTeamCommand: SlashCommand = {
     if (validRecipients.length === 0) return;
 
     const recipientList = validRecipients.map((r) => `@${r}`).join(', ');
+    ui.setLoading(true);
     ui.setPendingItem({
       type: MessageType.GEMINI,
       text: `Compressing and sharing context with ${recipientList}...`,
@@ -439,6 +440,7 @@ export const shareTeamCommand: SlashCommand = {
         Date.now(),
       );
     } finally {
+      ui.setLoading(false);
       ui.setPendingItem(null);
     }
   },

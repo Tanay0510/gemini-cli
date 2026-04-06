@@ -161,9 +161,16 @@ export class GitService {
    */
   async getRemoteOrigin(): Promise<string | null> {
     try {
-      const remotes = await this.shadowGitRepository.getRemotes(true);
-      const origin = remotes.find((r) => r.name === 'origin');
-      return origin?.refs.fetch || null;
+      // Use a direct git command to avoid any environment inheritance issues from the shadow repo.
+      const { stdout } = await spawnAsync(
+        'git',
+        ['remote', 'get-url', 'origin'],
+        {
+          cwd: this.projectRoot,
+        },
+      );
+      const origin = stdout.trim();
+      return origin || null;
     } catch (err) {
       debugLogger.debug('Failed to get remote origin:', err);
       return null;

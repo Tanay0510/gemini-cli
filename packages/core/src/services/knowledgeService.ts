@@ -189,7 +189,8 @@ export class KnowledgeService {
       }
     }
 
-    return requests;
+    // Sort by timestamp descending (latest first)
+    return requests.sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
   }
 
   /**

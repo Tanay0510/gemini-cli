@@ -56,7 +56,7 @@ function renderInbox(inbox: SharedContextEnvelope[]): string {
   });
   lines.push('');
   lines.push('  /inbox load <#>     — load context into current session');
-  lines.push('  /inbox dismiss <#>  — delete without loading');
+  lines.push('  /inbox delete <#>   — delete without loading');
   lines.push('');
   lines.push(
     '  Tip: You can add a label when sharing: /share @teammate "fix for auth bug"',
@@ -298,10 +298,10 @@ const loadSubCommand: SlashCommand = {
   },
 };
 
-const dismissSubCommand: SlashCommand = {
-  name: 'dismiss',
+const deleteSubCommand: SlashCommand = {
+  name: 'delete',
   description:
-    'Delete a shared context without loading it. Usage: /inbox dismiss <#>',
+    'Delete a shared context without loading it. Usage: /inbox delete <#>',
   kind: CommandKind.BUILT_IN,
   autoExecute: true,
   takesArgs: true,
@@ -313,7 +313,7 @@ const dismissSubCommand: SlashCommand = {
       ui.addItem(
         {
           type: MessageType.ERROR,
-          text: 'Usage: /inbox dismiss <#>  (e.g. /inbox dismiss 1)',
+          text: 'Usage: /inbox delete <#>  (e.g. /inbox delete 1)',
         },
         Date.now(),
       );
@@ -347,7 +347,7 @@ const dismissSubCommand: SlashCommand = {
     ui.setLoading(true);
     ui.setPendingItem({
       type: MessageType.GEMINI,
-      text: `Dismissing context from @${entry.from}…`,
+      text: `Deleting context from @${entry.from}…`,
     });
 
     try {
@@ -357,14 +357,14 @@ const dismissSubCommand: SlashCommand = {
       ui.addItem(
         {
           type: MessageType.INFO,
-          text: `Dismissed context from @${entry.from}.`,
+          text: `Deleted context from @${entry.from}.`,
         },
         Date.now(),
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       ui.addItem(
-        { type: MessageType.ERROR, text: `Failed to dismiss: ${message}` },
+        { type: MessageType.ERROR, text: `Failed to delete: ${message}` },
         Date.now(),
       );
     } finally {
@@ -375,12 +375,12 @@ const dismissSubCommand: SlashCommand = {
 };
 
 /**
- * `/inbox` — lists, loads, or dismisses conversation contexts shared with you.
+ * `/inbox` — lists, loads, or deletes conversation contexts shared with you.
  *
  * Usage:
  *   /inbox              — list all shared contexts
  *   /inbox load 1       — load context #1 into the current session
- *   /inbox dismiss 2    — delete context #2 without loading
+ *   /inbox delete 2     — delete context #2 without loading
  */
 export const inboxCommand: SlashCommand = {
   name: 'inbox',
@@ -388,7 +388,7 @@ export const inboxCommand: SlashCommand = {
     'View and load conversation contexts shared with you by teammates.',
   kind: CommandKind.BUILT_IN,
   autoExecute: true,
-  subCommands: [listSubCommand, loadSubCommand, dismissSubCommand],
+  subCommands: [listSubCommand, loadSubCommand, deleteSubCommand],
 
   // Running `/inbox` with no sub-command defaults to listing.
   action: async (context, args) => {
