@@ -116,8 +116,14 @@ export const askCommand: SlashCommand = {
 
     // --- Handle Management Flags ---
     if (firstToken === '--list-requests') {
+      ui.setLoading(true);
+      ui.setPendingItem({
+        type: MessageType.GEMINI,
+        text: 'Checking for pending teammate requests...',
+      });
       try {
         const requests = await knowledgeService.listPendingRequests(myEmail);
+        ui.setPendingItem(null);
         if (requests.length === 0) {
           ui.addItem(
             { type: MessageType.GEMINI, text: 'No pending teammate requests.' },
@@ -147,6 +153,8 @@ export const askCommand: SlashCommand = {
           },
           Date.now(),
         );
+      } finally {
+        ui.setLoading(false);
       }
       return;
     }
