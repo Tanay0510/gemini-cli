@@ -133,14 +133,14 @@ const listSubCommand: SlashCommand = {
       os.userInfo().username,
     );
 
-    ui.addItem(
-      { type: MessageType.INFO, text: `Checking inbox for @${myName}…` },
-      Date.now(),
-    );
+    ui.setLoading(true);
+    ui.setPendingItem({
+      type: MessageType.GEMINI,
+      text: `Checking inbox for @${myName}…`,
+    });
 
     try {
       cachedInbox = await shareService.listInbox(myName);
-
       ui.addItem(
         { type: MessageType.INFO, text: renderInbox(cachedInbox) },
         Date.now(),
@@ -151,6 +151,9 @@ const listSubCommand: SlashCommand = {
         { type: MessageType.ERROR, text: `Failed to fetch inbox: ${message}` },
         Date.now(),
       );
+    } finally {
+      ui.setLoading(false);
+      ui.setPendingItem(null);
     }
   },
 };
@@ -212,13 +215,11 @@ const loadSubCommand: SlashCommand = {
       return;
     }
 
-    ui.addItem(
-      {
-        type: MessageType.INFO,
-        text: `Loading context from @${entry.from}…`,
-      },
-      Date.now(),
-    );
+    ui.setLoading(true);
+    ui.setPendingItem({
+      type: MessageType.GEMINI,
+      text: `Loading context from @${entry.from}…`,
+    });
 
     try {
       const history = await shareService.loadShared(entry.fileName);
@@ -230,13 +231,10 @@ const loadSubCommand: SlashCommand = {
       cachedInbox = cachedInbox.filter((_, i) => i !== index);
 
       // Generate a recipient-oriented briefing of the loaded context
-      ui.addItem(
-        {
-          type: MessageType.INFO,
-          text: 'Analyzing loaded context…',
-        },
-        Date.now(),
-      );
+      ui.setPendingItem({
+        type: MessageType.GEMINI,
+        text: 'Analyzing loaded context…',
+      });
 
       const agentCtx = context.services.agentContext;
       const config = agentCtx?.config;
@@ -293,6 +291,9 @@ const loadSubCommand: SlashCommand = {
         { type: MessageType.ERROR, text: `Failed to load context: ${message}` },
         Date.now(),
       );
+    } finally {
+      ui.setLoading(false);
+      ui.setPendingItem(null);
     }
   },
 };
@@ -343,6 +344,12 @@ const dismissSubCommand: SlashCommand = {
       return;
     }
 
+    ui.setLoading(true);
+    ui.setPendingItem({
+      type: MessageType.GEMINI,
+      text: `Dismissing context from @${entry.from}…`,
+    });
+
     try {
       await shareService.dismiss(entry.fileName);
       cachedInbox = cachedInbox.filter((_, i) => i !== index);
@@ -360,6 +367,9 @@ const dismissSubCommand: SlashCommand = {
         { type: MessageType.ERROR, text: `Failed to dismiss: ${message}` },
         Date.now(),
       );
+    } finally {
+      ui.setLoading(false);
+      ui.setPendingItem(null);
     }
   },
 };

@@ -59,6 +59,7 @@ export const StatusNode: React.FC<{
   showWit: boolean;
   thought: ThoughtSummary | null;
   elapsedTime: number;
+  currentLoadingPhrase: string | undefined;
   currentWittyPhrase: string | undefined;
   activeHooks: ActiveHook[];
   showLoadingIndicator: boolean;
@@ -69,6 +70,7 @@ export const StatusNode: React.FC<{
   showWit,
   thought,
   elapsedTime,
+  currentLoadingPhrase: currentLoadingPhraseFromUi,
   currentWittyPhrase,
   activeHooks,
   showLoadingIndicator,
@@ -100,7 +102,7 @@ export const StatusNode: React.FC<{
 
   if (activeHooks.length === 0 && !showLoadingIndicator) return null;
 
-  let currentLoadingPhrase: string | undefined = undefined;
+  let currentLoadingPhrase: string | undefined = currentLoadingPhraseFromUi;
   let currentThought: ThoughtSummary | null = null;
 
   if (activeHooks.length > 0) {
@@ -141,6 +143,7 @@ export const StatusNode: React.FC<{
         elapsedTime={elapsedTime}
         forceRealStatusOnly={false}
         wittyPhrase={currentWittyPhrase}
+        showLoadingIndicator={showLoadingIndicator}
       />
     </Box>
   );
@@ -246,6 +249,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
       showWit={showWit}
       thought={uiState.thought}
       elapsedTime={uiState.elapsedTime}
+      currentLoadingPhrase={uiState.currentLoadingPhrase}
       currentWittyPhrase={uiState.currentWittyPhrase}
       activeHooks={uiState.activeHooks}
       showLoadingIndicator={showLoadingIndicator}

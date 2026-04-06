@@ -29,6 +29,10 @@ interface GeminiRespondingSpinnerProps {
    */
   isHookActive?: boolean;
   color?: string;
+  /**
+   * If true, we show the rainbow spinner even if NOT in Responding state.
+   */
+  showLoadingIndicator?: boolean;
 }
 
 export const GeminiRespondingSpinner: React.FC<
@@ -38,13 +42,17 @@ export const GeminiRespondingSpinner: React.FC<
   spinnerType = 'dots',
   isHookActive = false,
   color,
+  showLoadingIndicator = false,
 }) => {
   const streamingState = useStreamingContext();
   const isScreenReaderEnabled = useIsScreenReaderEnabled();
 
   // If a hook is active, we want to show the hook icon (nonRespondingDisplay)
   // to be consistent, instead of the rainbow spinner which means "Gemini is talking".
-  if (streamingState === StreamingState.Responding && !isHookActive) {
+  if (
+    (streamingState === StreamingState.Responding || showLoadingIndicator) &&
+    !isHookActive
+  ) {
     return (
       <GeminiSpinner
         spinnerType={spinnerType}

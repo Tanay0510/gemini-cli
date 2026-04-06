@@ -64,6 +64,13 @@ export interface CommandContext {
      */
     setPendingItem: (item: HistoryItemWithoutId | null) => void;
     /**
+     * Shows or hides the animated loading spinner in the status bar.
+     * Use this to indicate that a slash command is performing async work.
+     *
+     * @param loading `true` to show the spinner, `false` to hide it.
+     */
+    setLoading: (loading: boolean) => void;
+    /**
      * Loads a new set of history items, replacing the current history.
      *
      * @param history The array of history items to load.

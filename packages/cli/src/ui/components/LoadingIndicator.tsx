@@ -31,6 +31,7 @@ interface LoadingIndicatorProps {
   forceRealStatusOnly?: boolean;
   spinnerIcon?: string;
   isHookActive?: boolean;
+  showLoadingIndicator?: boolean;
 }
 
 export const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({
@@ -46,6 +47,7 @@ export const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({
   forceRealStatusOnly = false,
   spinnerIcon,
   isHookActive = false,
+  showLoadingIndicator = false,
 }) => {
   const streamingState = useStreamingContext();
   const { columns: terminalWidth } = useTerminalSize();
@@ -54,7 +56,8 @@ export const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({
   if (
     streamingState === StreamingState.Idle &&
     !currentLoadingPhrase &&
-    !thought
+    !thought &&
+    !showLoadingIndicator
   ) {
     return null;
   }
@@ -67,7 +70,7 @@ export const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({
       : thought?.subject
         ? (thoughtLabel ?? thought.subject)
         : currentLoadingPhrase ||
-          (streamingState === StreamingState.Responding
+          (streamingState === StreamingState.Responding || showLoadingIndicator
             ? 'Thinking...'
             : undefined);
 
@@ -94,6 +97,7 @@ export const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({
       <Box>
         <Box marginRight={1}>
           <GeminiRespondingSpinner
+            showLoadingIndicator={showLoadingIndicator || !!thought}
             nonRespondingDisplay={
               spinnerIcon ??
               (streamingState === StreamingState.WaitingForConfirmation
@@ -138,6 +142,7 @@ export const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({
         <Box>
           <Box marginRight={1}>
             <GeminiRespondingSpinner
+              showLoadingIndicator={showLoadingIndicator || !!thought}
               nonRespondingDisplay={
                 spinnerIcon ??
                 (streamingState === StreamingState.WaitingForConfirmation

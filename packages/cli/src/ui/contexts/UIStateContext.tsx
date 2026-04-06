@@ -139,6 +139,7 @@ export interface UIState {
   permissionConfirmationRequest: PermissionConfirmationRequest | null;
   geminiMdFileCount: number;
   streamingState: StreamingState;
+  isCommandLoading: boolean;
   initError: string | null;
   pendingGeminiHistoryItems: HistoryItemWithoutId[];
   thought: ThoughtSummary | null;

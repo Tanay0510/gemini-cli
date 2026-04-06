@@ -230,6 +230,7 @@ export const AppContainer = (props: AppContainerProps) => {
     initializationResult.themeError,
   );
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isCommandLoading, setIsCommandLoading] = useState<boolean>(false);
   const [embeddedShellFocused, setEmbeddedShellFocused] = useState(false);
   const [showDebugProfiler, setShowDebugProfiler] = useState(false);
   const [customDialog, setCustomDialog] = useState<React.ReactNode | null>(
@@ -779,7 +780,6 @@ export const AppContainer = (props: AppContainerProps) => {
   }, [authState, authContext, setAuthState]);
 
   const lastRequestCountRef = useRef<number>(0);
-  const lastNotifiedTimeRef = useRef<number>(0);
 
   // Check for teammate knowledge requests periodically
   useEffect(() => {
@@ -810,12 +810,11 @@ export const AppContainer = (props: AppContainerProps) => {
 
         // Only notify if:
         // 1. The count has increased (new request)
-        // 2. OR it's been more than 1 hour since the last notification and count > 0
+        // 2. OR it's the very first check (startup) and count > 0
+        const isFirstCheck = lastRequestCountRef.current === 0;
         const hasNewRequests = requests.length > lastRequestCountRef.current;
-        const shouldRemind =
-          requests.length > 0 && now - lastNotifiedTimeRef.current > 3600000;
 
-        if (hasNewRequests || shouldRemind) {
+        if (hasNewRequests || (isFirstCheck && requests.length > 0)) {
           historyManager.addItem(
             {
               type: MessageType.GEMINI,
@@ -823,7 +822,6 @@ export const AppContainer = (props: AppContainerProps) => {
             },
             now,
           );
-          lastNotifiedTimeRef.current = now;
         }
         lastRequestCountRef.current = requests.length;
       } catch (err) {
@@ -1119,6 +1117,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
     refreshStatic,
     toggleVimEnabled,
     setIsProcessing,
+    setIsCommandLoading,
     slashCommandActions,
     extensionsUpdateStateInternal,
     isConfigInitialized,
@@ -2238,7 +2237,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
 
   const showLoadingIndicator =
     (!embeddedShellFocused || isBackgroundTaskVisible) &&
-    streamingState === StreamingState.Responding &&
+    (streamingState === StreamingState.Responding || isCommandLoading) &&
     !hasPendingActionRequired;
 
   let estimatedStatusLength = 0;
@@ -2272,6 +2271,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
       customWittyPhrases: settings.merged.ui.customWittyPhrases,
       errorVerbosity: settings.merged.ui.errorVerbosity,
       maxLength,
+      isCommandLoading,
     });
 
   const allowPlanMode =
@@ -2425,6 +2425,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
       permissionConfirmationRequest,
       geminiMdFileCount,
       streamingState,
+      isCommandLoading,
       initError,
       pendingGeminiHistoryItems,
       thought,
@@ -2551,6 +2552,7 @@ Logging in with Google... Restarting Gemini CLI to continue.
       permissionConfirmationRequest,
       geminiMdFileCount,
       streamingState,
+      isCommandLoading,
       initError,
       pendingGeminiHistoryItems,
       thought,

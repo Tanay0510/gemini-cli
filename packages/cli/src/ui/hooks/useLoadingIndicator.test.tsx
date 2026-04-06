@@ -36,6 +36,7 @@ describe('useLoadingIndicator', () => {
     initialShowTips: boolean = true,
     initialShowWit: boolean = true,
     initialErrorVerbosity: 'low' | 'full' = 'full',
+    initialIsCommandLoading: boolean = false,
   ) => {
     let hookResult: ReturnType<typeof useLoadingIndicator>;
     function TestComponent({
@@ -45,6 +46,7 @@ describe('useLoadingIndicator', () => {
       showTips,
       showWit,
       errorVerbosity,
+      isCommandLoading,
     }: {
       streamingState: StreamingState;
       shouldShowFocusHint?: boolean;
@@ -52,6 +54,7 @@ describe('useLoadingIndicator', () => {
       showTips?: boolean;
       showWit?: boolean;
       errorVerbosity?: 'low' | 'full';
+      isCommandLoading?: boolean;
     }) {
       hookResult = useLoadingIndicator({
         streamingState,
@@ -60,6 +63,7 @@ describe('useLoadingIndicator', () => {
         showTips,
         showWit,
         errorVerbosity,
+        isCommandLoading,
       });
       return null;
     }
@@ -72,6 +76,7 @@ describe('useLoadingIndicator', () => {
         showTips={initialShowTips}
         showWit={initialShowWit}
         errorVerbosity={initialErrorVerbosity}
+        isCommandLoading={initialIsCommandLoading}
       />,
     );
     return {
@@ -87,12 +92,14 @@ describe('useLoadingIndicator', () => {
         showTips?: boolean;
         showWit?: boolean;
         errorVerbosity?: 'low' | 'full';
+        isCommandLoading?: boolean;
       }) => {
         rerender(
           <TestComponent
             showTips={initialShowTips}
             showWit={initialShowWit}
             errorVerbosity={initialErrorVerbosity}
+            isCommandLoading={initialIsCommandLoading}
             {...newProps}
           />,
         );
@@ -107,6 +114,29 @@ describe('useLoadingIndicator', () => {
     const { result } = await renderLoadingIndicatorHook(StreamingState.Idle);
     expect(result.current.elapsedTime).toBe(0);
     expect(result.current.currentLoadingPhrase).toBeUndefined();
+  });
+
+  it('should cycle phrases and increment timer when isCommandLoading is true even if Idle', async () => {
+    vi.spyOn(Math, 'random').mockImplementation(() => 0.5); // Always witty for subsequent phrases
+    const { result } = await renderLoadingIndicatorHook(
+      StreamingState.Idle,
+      false,
+      null,
+      true,
+      true,
+      'full',
+      true,
+    );
+
+    expect(result.current.elapsedTime).toBe(0);
+    expect([...WITTY_LOADING_PHRASES, ...INFORMATIVE_TIPS]).toContain(
+      result.current.currentLoadingPhrase,
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(result.current.elapsedTime).toBe(1);
   });
 
   it('should show interactive shell waiting phrase when shouldShowFocusHint is true', async () => {

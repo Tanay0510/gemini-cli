@@ -17,11 +17,13 @@ import * as useTerminalSize from '../hooks/useTerminalSize.js';
 vi.mock('./GeminiRespondingSpinner.js', () => ({
   GeminiRespondingSpinner: ({
     nonRespondingDisplay,
+    showLoadingIndicator,
   }: {
     nonRespondingDisplay?: string;
+    showLoadingIndicator?: boolean;
   }) => {
     const streamingState = React.useContext(StreamingContext)!;
-    if (streamingState === StreamingState.Responding) {
+    if (streamingState === StreamingState.Responding || showLoadingIndicator) {
       return <Text>MockRespondingSpinner</Text>;
     } else if (nonRespondingDisplay) {
       return <Text>{nonRespondingDisplay}</Text>;
@@ -53,6 +55,32 @@ describe('<LoadingIndicator />', () => {
     currentLoadingPhrase: 'Thinking...',
     elapsedTime: 5,
   };
+
+  it('should render spinner when showLoadingIndicator is true even if state is Idle', async () => {
+    const { lastFrame, waitUntilReady } = await renderWithContext(
+      <LoadingIndicator {...defaultProps} showLoadingIndicator={true} />,
+      StreamingState.Idle,
+    );
+    await waitUntilReady();
+    const output = lastFrame();
+    expect(output).toContain('MockRespondingSpinner');
+    expect(output).toContain('Thinking...');
+  });
+
+  it('should render spinner when thought is present even if state is Idle', async () => {
+    const props = {
+      thought: { subject: 'Thinking deep thoughts', description: '' },
+      elapsedTime: 5,
+    };
+    const { lastFrame, waitUntilReady } = await renderWithContext(
+      <LoadingIndicator {...props} />,
+      StreamingState.Idle,
+    );
+    await waitUntilReady();
+    const output = lastFrame();
+    expect(output).toContain('MockRespondingSpinner');
+    expect(output).toContain('Thinking deep thoughts');
+  });
 
   it('should render blank when streamingState is Idle and no loading phrase or thought', async () => {
     const { lastFrame, waitUntilReady } = await renderWithContext(

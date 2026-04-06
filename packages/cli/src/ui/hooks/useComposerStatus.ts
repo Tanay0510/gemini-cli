@@ -50,7 +50,8 @@ export const useComposerStatus = () => {
 
   const showLoadingIndicator =
     (!uiState.embeddedShellFocused || uiState.isBackgroundTaskVisible) &&
-    uiState.streamingState === StreamingState.Responding &&
+    (uiState.streamingState === StreamingState.Responding ||
+      uiState.isCommandLoading) &&
     !hasPendingActionRequired;
 
   const showApprovalModeIndicator = uiState.showApprovalModeIndicator;

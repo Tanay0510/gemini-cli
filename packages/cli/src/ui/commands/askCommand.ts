@@ -177,6 +177,7 @@ export const askCommand: SlashCommand = {
           return;
         }
 
+        ui.setLoading(true);
         ui.setPendingItem({
           type: MessageType.GEMINI,
           text: `Searching local history to fulfill request from @${targetRequest.fromEmail}: "${targetRequest.query}"...`,
@@ -272,6 +273,8 @@ export const askCommand: SlashCommand = {
           },
           Date.now(),
         );
+      } finally {
+        ui.setLoading(false);
       }
       return;
     }
@@ -305,6 +308,7 @@ export const askCommand: SlashCommand = {
     );
     const targetEmail = normalizeRecipient(recipient, fromName);
 
+    ui.setLoading(true);
     ui.setPendingItem({
       type: MessageType.GEMINI,
       text: `Searching @${targetEmail}'s knowledge base for: "${query}"...`,
@@ -446,6 +450,8 @@ export const askCommand: SlashCommand = {
         },
         Date.now(),
       );
+    } finally {
+      ui.setLoading(false);
     }
   },
 };
